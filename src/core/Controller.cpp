@@ -19,6 +19,7 @@
 #include <KArchiveFile>
 #include <KSyntaxHighlighting/Repository>
 #include <KZip>
+#include <QDBusPendingCallWatcher>
 #include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFontMetricsF>
@@ -633,7 +634,7 @@ struct Controller::Private {
             return;
         if (QUrl(shownFile.uri).scheme() == QLatin1String("trash"))
             return showHint(Str::AlreadyInTrash);
-        trashTarget = shownFile.path.isEmpty() ? shownFile.uri : shownFile.path;
+        trashTarget = shownFile.path.isEmpty() ? shownFile.uri : QString::fromLatin1(QUrl::fromLocalFile(shownFile.path).toEncoded());
         trashTriedLeft = false;
         service->emitSelectionEvent(selectionDirection(KeyAction::Right));
         trashTimer.start();
@@ -651,14 +652,22 @@ struct Controller::Private {
         service->requestClose();
     }
 
+    // Files trashes it, so its Ctrl+Z undoes it (and it asks itself where there is no Trash). Files not on the bus
+    // (tests): GIO directly, not undoable.
     void trashNow()
     {
         trashTimer.stop();
-        QtConcurrent::run(pools::probe(), [target = std::exchange(trashTarget, QString())] { return trashFile(target); })
-            .then(q, [this](bool ok) {
+        const QString target = std::exchange(trashTarget, QString());
+        auto *call = new QDBusPendingCallWatcher(service->trashViaFiles(target), q);
+        QObject::connect(call, &QDBusPendingCallWatcher::finished, q, [this, call, target] {
+            call->deleteLater();
+            if (!call->isError())
+                return;
+            QtConcurrent::run(pools::probe(), [target] { return trashFile(target); }).then(q, [this](bool ok) {
                 if (!ok)
                     showHint(Str::TrashFailed);
             });
+        });
     }
 
     void showPdf(const QString &pdfPath)

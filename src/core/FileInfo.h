@@ -25,7 +25,7 @@ struct FileInfo {
 
 FileInfo resolveFile(const QString &uri);   // blocking (GIO + read): probe pool only
 FileInfo infoForPath(const QString &path);  // same for a local path
-bool trashFile(const QString &pathOrUri);    // blocking g_file_trash: probe pool only
+bool trashFile(const QString &pathOrUri);    // blocking g_file_trash (not in Files' undo): probe pool only
 Kind classify(const FileInfo &info);
         // dir -> FolderCard; !exists or no path -> FileCard; size 0 -> FileCard;
         // application/pdf -> Pdf; isOfficeType && hasOfficeSignature -> Office;

@@ -4,6 +4,7 @@
 #include <QDBusAbstractAdaptor>
 #include <QDBusConnection>
 #include <QDBusMessage>
+#include <QDBusPendingCall>
 #include <QDBusServiceWatcher>
 #include <QObject>
 #include <QVariantMap>
@@ -24,6 +25,8 @@ public:
     QString parentHandle() const { return m_parentHandle; }
     void emitSelectionEvent(uint direction);   // only 2..5 are sent
     void requestClose();                   // UI close (keys, Super+W): same path as Close()
+    QDBusPendingCall trashViaFiles(const QString &uri);
+        // org.gnome.Nautilus.FileOperations2.TrashURIs, no auto start: Files records it, so its Ctrl+Z undoes it
 
     // Called by PreviewerAdaptor; public for tests.
     void handleShowFile(const QString &uri, const QString &windowHandle, bool closeIfAlreadyShown,

@@ -34,6 +34,17 @@ void PreviewerService::emitSelectionEvent(uint direction)
 
 void PreviewerService::requestClose() { handleClose(); }
 
+QDBusPendingCall PreviewerService::trashViaFiles(const QString &uri)
+{
+    if (!m_connection.isConnected())   // a disconnected connection would only time out (25 s)
+        return QDBusPendingCall::fromError(QDBusError(QDBusError::Disconnected, QStringLiteral("no session bus")));
+    auto msg = QDBusMessage::createMethodCall(QStringLiteral("org.gnome.Nautilus"), QStringLiteral("/org/gnome/Nautilus/FileOperations2"),
+                                              QStringLiteral("org.gnome.Nautilus.FileOperations2"), QStringLiteral("TrashURIs"));
+    msg << QStringList{uri} << QVariantMap{};
+    msg.setAutoStartService(false);
+    return m_connection.asyncCall(msg);
+}
+
 void PreviewerService::handleClose() { emitDecision(m_session->close()); }
 
 void PreviewerService::handleShowFile(const QString &uri, const QString &windowHandle, bool closeIfAlreadyShown,
