@@ -38,7 +38,7 @@ function(ql_test name)
     target_compile_definitions(${name} PRIVATE QL_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME ${name} COMMAND ${name})
     set_tests_properties(${name} PROPERTIES
-        ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM=set:offscreen;QT_QPA_PLATFORMTHEME=unset:;HYPRLAND_INSTANCE_SIGNATURE=unset:;XDG_CACHE_HOME=set:${QL_TEST_HOME}/cache;XDG_STATE_HOME=set:${QL_TEST_HOME}/state;XDG_CONFIG_HOME=set:${QL_TEST_HOME}/config;XDG_DATA_HOME=set:${QL_TEST_HOME}/data;QT_QPA_OFFSCREEN_NO_GLX=set:1;QT_QUICK_BACKEND=set:software;GIO_USE_VFS=set:local"
+        ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM=set:offscreen;QT_QPA_PLATFORMTHEME=unset:;HYPRLAND_INSTANCE_SIGNATURE=unset:;XDG_CACHE_HOME=set:${QL_TEST_HOME}/cache;XDG_STATE_HOME=set:${QL_TEST_HOME}/state;XDG_CONFIG_HOME=set:${QL_TEST_HOME}/config;XDG_DATA_HOME=set:${QL_TEST_HOME}/data;QT_QPA_OFFSCREEN_NO_GLX=set:1;QT_QUICK_BACKEND=set:software;GIO_USE_VFS=set:local;QT_IM_MODULE=unset:"
         LABELS "${ARGN}")
 endfunction()
 
@@ -73,3 +73,7 @@ ql_test(tst_image)
 
 target_sources(qlcore PRIVATE src/core/Pdf.h src/core/Pdf.cpp src/core/PdfModel.h src/core/PdfModel.cpp)
 ql_test(tst_pdf)
+
+target_sources(qlcore PRIVATE src/core/Office.h src/core/Office.cpp src/core/OfficeCache.h src/core/OfficeCache.cpp)
+ql_test(tst_office)
+ql_test(tst_officecache)
