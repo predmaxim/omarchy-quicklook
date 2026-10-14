@@ -1,0 +1,22 @@
+#!/bin/bash
+# Stand-in for soffice in tst_officeconverter. Logs to $STUB_LOG.
+# --convert-to: 0.3 s (5 s if the file name contains "slow"), then <basename>.pdf into --outdir.
+# otherwise (warm instance): fake OSL pipe, marker in $TMPDIR, ignore SIGTERM, sleep forever.
+log=${STUB_LOG:-/dev/null}
+if [[ " $* " == *" --convert-to "* ]]; then
+    prev= outdir= file=
+    for a in "$@"; do [[ $prev == --outdir ]] && outdir=$a; prev=$a; file=$a; done
+    echo "convert $$ $file" >> "$log"
+    case $file in
+        *slow*) sleep 5 & echo "sleep $!" >> "$log"; wait ;;
+        *) sleep 0.3 ;;
+    esac
+    base=${file##*/}
+    printf '%%PDF-1.4 stub\n' > "$outdir/${base%.*}.pdf"
+else
+    echo "instance $$ $TMPDIR" >> "$log"
+    : > "$TMPDIR/instance-marker"
+    : > "/tmp/OSL_PIPE_$(id -u)_qltest_$$"
+    trap 'echo "term $$" >> "$log"' TERM
+    while :; do sleep 1000 & echo "sleep $!" >> "$log"; wait; done
+fi

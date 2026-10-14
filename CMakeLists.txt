@@ -77,3 +77,7 @@ ql_test(tst_pdf)
 target_sources(qlcore PRIVATE src/core/Office.h src/core/Office.cpp src/core/OfficeCache.h src/core/OfficeCache.cpp)
 ql_test(tst_office)
 ql_test(tst_officecache)
+
+target_sources(qlcore PRIVATE src/core/OfficeConverter.h src/core/OfficeConverter.cpp)
+qt_add_resources(qlcore "office" PREFIX "/" FILES resources/anchor.odt)
+ql_test(tst_officeconverter)
