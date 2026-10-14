@@ -57,3 +57,7 @@ target_sources(qlcore PRIVATE src/core/FileInfo.h src/core/FileInfo.cpp src/core
 ql_test(tst_fileinfo)
 target_sources(qlcore PRIVATE src/core/TextDecode.h src/core/TextDecode.cpp)
 ql_test(tst_textdecode)
+target_sources(qlcore PRIVATE src/core/TextRows.h src/core/TextRows.cpp)
+ql_test(tst_textrows)
+target_sources(qlcore PRIVATE src/core/TextModel.h src/core/TextModel.cpp)
+ql_test(tst_textmodel)
