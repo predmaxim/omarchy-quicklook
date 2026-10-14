@@ -47,3 +47,5 @@ target_sources(qlcore PRIVATE src/core/Types.h src/core/Types.cpp src/core/Pools
 ql_test(tst_types)
 target_sources(qlcore PRIVATE src/core/Geometry.h src/core/Geometry.cpp)
 ql_test(tst_geometry)
+target_sources(qlcore PRIVATE src/core/Hyprland.h src/core/Hyprland.cpp)
+ql_test(tst_hyprland)
