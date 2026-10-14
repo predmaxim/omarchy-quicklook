@@ -5,6 +5,7 @@
 #include <KZip>
 #include <QFile>
 #include <QImage>
+#include <QImageReader>
 #include <QPdfWriter>
 #include <QPainter>
 #include <QProcess>
@@ -57,6 +58,7 @@ private Q_SLOTS:
     {
         qputenv("GIO_USE_VFS", "local");   // gvfs would join the user's session bus on the first GIO call
         qunsetenv("HYPRLAND_INSTANCE_SIGNATURE");
+        QImageReader::setAllocationLimit(1024);   // as main() does
         QVERIFY(dir.isValid());
     }
 
@@ -79,7 +81,19 @@ private Q_SLOTS:
         const QString tp = thumbnailPath(none.file.canonicalUri, QStringLiteral("large"));
         QVERIFY(QDir().mkpath(QFileInfo(tp).path()));
         QVERIFY(th.save(tp, "PNG"));
-        QVERIFY(!runProbe(req(f)).placeholder.isNull());
+        const ProbeResult withTh = runProbe(req(f));
+        QVERIFY(!withTh.placeholder.isNull());
+        const QSize lim = (withTh.layout.content.size() * withTh.monitor.scale).toSize();
+        QVERIFY(withTh.placeholder.width() <= lim.width() && withTh.placeholder.height() <= lim.height());
+        QCOMPARE(withTh.placeholder.size(), QSize(128, 72));   // smaller than content: not enlarged
+        // a large thumbnail is shrunk into the content rect
+        QImage big(4000, 2250, QImage::Format_RGB32);
+        big.fill(Qt::green);
+        big.setText(QStringLiteral("Thumb::MTime"), QString::number(none.file.modified.toSecsSinceEpoch()));
+        QVERIFY(big.save(tp, "PNG"));
+        const ProbeResult shrunk = runProbe(req(f));
+        QVERIFY(shrunk.placeholder.width() <= lim.width() && shrunk.placeholder.height() <= lim.height());
+        QVERIFY(shrunk.placeholder.width() < 4000);
     }
     void vanished()
     {
@@ -109,14 +123,54 @@ private Q_SLOTS:
         const QString f = p("fake.png");
         put(f, "%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n");
         const ProbeResult r = runProbe(req(f));
-        QVERIFY(r.kind == Kind::FileCard || r.kind == Kind::Text);
-        if (r.kind == Kind::FileCard)
-            QCOMPARE(r.reason, CardReason::CannotOpen);
+        QCOMPARE(r.kind, Kind::FileCard);
+        QCOMPARE(r.reason, CardReason::CannotOpen);
         const QString g = p("trunc.png");
         put(g, QByteArray("\x89PNG\r\n\x1a\n", 8) + "junk");
         const ProbeResult t = runProbe(req(g));
         QCOMPARE(t.kind, Kind::FileCard);
         QCOMPARE(t.reason, CardReason::CannotOpen);
+    }
+    static QByteArray pngChunk(const QByteArray &type, const QByteArray &data)
+    {
+        quint32 c = 0xffffffffu;
+        for (uchar b : type + data) {
+            c ^= b;
+            for (int k = 0; k < 8; ++k)
+                c = (c >> 1) ^ (0xedb88320u & (0u - (c & 1)));
+        }
+        QByteArray out;
+        QDataStream ds(&out, QIODevice::WriteOnly);   // big endian
+        ds << quint32(data.size());
+        out += type + data;
+        ds.device()->seek(out.size());
+        ds << quint32(~c);
+        return out;
+    }
+    void tooLarge()
+    {
+        QByteArray ihdr;
+        QDataStream ds(&ihdr, QIODevice::WriteOnly);
+        ds << quint32(12000) << quint32(12000);
+        ihdr += QByteArray("\x08\x02\x00\x00\x00", 5);
+        const QString f = p("huge.png");
+        put(f, QByteArray("\x89PNG\r\n\x1a\n", 8) + pngChunk("IHDR", ihdr) + pngChunk("IDAT", {}) + pngChunk("IEND", {}));
+        const ProbeResult r = runProbe(req(f));
+        QCOMPARE(r.kind, Kind::FileCard);
+        QCOMPARE(r.reason, CardReason::TooLarge);
+    }
+    void svg()
+    {
+        const QString f = p("a.svg");
+        put(f, "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect width='400' height='300'/></svg>");
+        const ProbeResult r = runProbe(req(f));
+        QCOMPARE(r.kind, Kind::Svg);
+        QCOMPARE(r.layout.window, geometry::svgLayout(QSizeF(400, 300), r.monitor).window);
+        const QString g = p("bad.svg");
+        put(g, "<svg xmlns='http://www.w3.org/2000/svg'><rect");
+        const ProbeResult b = runProbe(req(g));
+        QCOMPARE(b.kind, Kind::FileCard);
+        QCOMPARE(b.reason, CardReason::CannotOpen);
     }
     void pdf()
     {
@@ -152,6 +206,14 @@ private Q_SLOTS:
         const QString g = p("long.txt");
         put(g, QByteArray(3000, 'x') + "\n");
         QVERIFY(!runProbe(req(g)).highlight);
+        const QString h = p("tall.txt");
+        QByteArray many;
+        for (int i = 0; i < 5000; ++i)
+            many += "line\n";
+        put(h, many);
+        const ProbeResult t = runProbe(req(h));
+        const int boxH = geometry::box(t.monitor).height();   // rows are capped so that rows*rowHeight + 32 fits
+        QVERIFY(t.layout.window.height() <= boxH && t.layout.window.height() > boxH - t.textMeasure.rowHeight);
     }
     void office()
     {
