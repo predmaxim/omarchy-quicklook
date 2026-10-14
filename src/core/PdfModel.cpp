@@ -6,7 +6,9 @@
 #include <QMutexLocker>
 #include <QQuickImageResponse>
 #include <QQuickTextureFactory>
+#include <QPointer>
 #include <QRunnable>
+#include <memory>
 #include <atomic>
 
 namespace ql {
@@ -40,6 +42,11 @@ void PdfModel::setDocument(quint64 generation, const QString &path, int pages, Q
 void PdfModel::clear()
 {
     beginResetModel();
+    {
+        QMutexLocker lock(&g_mutex);
+        g_paths.remove(m_generation);
+    }
+    m_generation = 0;
     m_pages = 0;
     m_sizes.clear();
     endResetModel();
@@ -87,38 +94,61 @@ QHash<int, QByteArray> PdfModel::roleNames() const
 
 namespace {
 
-class PageResponse : public QQuickImageResponse, public QRunnable {
+struct PageState {
+    std::atomic_bool abort{false};
+    QImage image;
+    QString error;
+    QSizeF pagePt;
+};
+
+class PageResponse : public QQuickImageResponse {
     Q_OBJECT
 public:
-    PageResponse(quint64 gen, int page, int width) : m_gen(gen), m_page(page), m_width(width) { setAutoDelete(false); }
-    QQuickTextureFactory *textureFactory() const override { return QQuickTextureFactory::textureFactoryForImage(m_image); }
-    QString errorString() const override { return m_error; }
-    void cancel() override { m_abort = true; }
+    explicit PageResponse(std::shared_ptr<PageState> st) : m_state(std::move(st)) {}
+    QQuickTextureFactory *textureFactory() const override { return QQuickTextureFactory::textureFactoryForImage(m_state->image); }
+    QString errorString() const override { return m_state->error; }
+    void cancel() override { m_state->abort = true; }
 
-    void run() override
+    // runs on the response's thread: measured size first, finished() exactly once, last
+    void complete(quint64 gen, int page)
     {
-        QSizeF pt;
-        if (pools::isCurrent(m_gen) && !m_abort) {
-            m_image = pdf::renderPage(PdfModel::documentPath(m_gen), m_page, m_width, &m_abort, &pt);
-            if (m_image.isNull() && !m_abort && pools::isCurrent(m_gen))
-                m_error = QStringLiteral("render failed");
-            else if (!pt.isEmpty() && !m_abort)
-                Q_EMIT pageMeasured(m_gen, m_page, pt);
-        }
-        // posted to the response's own thread, last action: the engine deletes us only after finished()
-        QMetaObject::invokeMethod(this, [this] { Q_EMIT finished(); }, Qt::QueuedConnection);
+        if (!m_state->pagePt.isEmpty())
+            Q_EMIT pageMeasured(gen, page, m_state->pagePt);
+        Q_EMIT finished();
     }
 
 Q_SIGNALS:
     void pageMeasured(quint64 generation, int page, QSizeF pagePt);
 
 private:
+    std::shared_ptr<PageState> m_state;   // shared with the job: a response deleted early is never touched by the worker
+};
+
+class PageJob : public QRunnable {
+public:
+    PageJob(std::shared_ptr<PageState> st, QPointer<PageResponse> r, quint64 gen, int page, int width)
+        : m_state(std::move(st)), m_response(std::move(r)), m_gen(gen), m_page(page), m_width(width) {}
+    void run() override
+    {
+        PageState &s = *m_state;
+        if (pools::isCurrent(m_gen) && !s.abort) {
+            s.image = pdf::renderPage(PdfModel::documentPath(m_gen), m_page, m_width, &s.abort, &s.pagePt);
+            if (s.abort || !pools::isCurrent(m_gen)) {
+                s.image = {};
+                s.pagePt = {};
+            } else if (s.image.isNull()) {
+                s.error = QStringLiteral("render failed");
+            }
+        }
+        if (PageResponse *r = m_response.data())
+            QMetaObject::invokeMethod(r, [r, g = m_gen, p = m_page] { r->complete(g, p); }, Qt::QueuedConnection);
+    }
+private:
+    std::shared_ptr<PageState> m_state;
+    QPointer<PageResponse> m_response;
     quint64 m_gen;
     int m_page;
     int m_width;
-    std::atomic_bool m_abort{false};
-    QImage m_image;
-    QString m_error;
 };
 
 } // namespace
@@ -131,10 +161,13 @@ QQuickImageResponse *PdfPageProvider::requestImageResponse(const QString &id, co
     bool okGen = false, okPage = false;
     const quint64 gen = parts.value(0).toULongLong(&okGen);
     const int page = parts.value(1).toInt(&okPage);
-    auto *r = new PageResponse(okGen && okPage ? gen : 0, okPage ? page : -1, requestedSize.width() > 0 ? requestedSize.width() : 1000);
+    const auto st = std::make_shared<PageState>();
+    auto *r = new PageResponse(st);
+    const quint64 g = okGen && okPage ? gen : 0;
+    const int pg = okPage ? page : -1;
     // queued connection: dropped if the model dies while a render is running
     QObject::connect(r, &PageResponse::pageMeasured, m_model, &PdfModel::setPageSize, Qt::QueuedConnection);
-    pools::heavy()->start(r);
+    pools::heavy()->start(new PageJob(st, r, g, pg, requestedSize.width() > 0 ? requestedSize.width() : 1000));
     return r;
 }
 

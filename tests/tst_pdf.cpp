@@ -95,6 +95,28 @@ private Q_SLOTS:
         QVERIFY(b.width() > b.height());
         QVERIFY(pdf::renderPage(two, 9, 600, nullptr, nullptr).isNull());
     }
+    void renderOddPath()
+    {
+        const QString oddU = dir.filePath(QString::fromUtf8("a b Привет #%?.pdf"));
+        QVERIFY(QFile::copy(two, oddU));
+        QVERIFY(pdf::probe(oddU).ok);
+        QCOMPARE(pdf::renderPage(oddU, 0, 300, nullptr, nullptr).width(), 300);
+    }
+    void renderCapsLongestSide()
+    {
+        const QString tall = p("tall.pdf");
+        {
+            QPdfWriter w(tall);
+            w.setPageSize(QPageSize(QSizeF(70, 1800), QPageSize::Millimeter));
+            QPainter pa(&w);
+            pa.drawText(10, 10, QStringLiteral("tall"));
+        }
+        QSizeF pt;
+        const QImage img = pdf::renderPage(tall, 0, 3000, nullptr, &pt);
+        QVERIFY(!img.isNull());
+        QCOMPARE(qMax(img.width(), img.height()), 16384);
+        QVERIFY(pt.height() > pt.width() * 10);
+    }
     void renderAborted()
     {
         std::atomic_bool abort{true};
@@ -125,6 +147,34 @@ private Q_SLOTS:
         QCOMPARE(PdfModel::documentPath(8), garbage);
         m.clear();
         QCOMPARE(m.count(), 0);
+        QCOMPARE(PdfModel::documentPath(8), QString());
+    }
+    void modelEdgeCases()
+    {
+        PdfModel m;
+        m.setDocument(3, two, 2, {});   // empty first-page size -> A4 fallback
+        QVERIFY(qAbs(m.data(m.index(0), PdfModel::AspectRole).toDouble() - 842.0 / 595.0) < 1e-9);
+        QSignalSpy changed(&m, &PdfModel::dataChanged);
+        m.setPageSize(3, 2, QSizeF(1, 2));    // out of range
+        m.setPageSize(3, -1, QSizeF(1, 2));
+        m.setPageSize(3, 0, QSizeF());        // empty
+        m.setPageSize(3, 0, QSizeF(595, 842)); // unchanged
+        QCOMPARE(changed.size(), 0);
+        m.setDocument(4, two, 0, QSizeF(595, 842));
+        QCOMPARE(m.rowCount(), 0);
+        QVERIFY(!m.data(m.index(0), PdfModel::AspectRole).isValid());
+        m.setDocument(5, two, -3, QSizeF(595, 842));
+        QCOMPARE(m.count(), 0);
+    }
+    void probeFailurePaths()
+    {
+        QVERIFY(!pdf::probe(QString()).ok);
+        const auto h = pdf::probe(garbage);
+        QVERIFY(!h.ok && !h.locked && h.pages == 0);
+        if (!locked.isEmpty()) {
+            QCOMPARE(pdf::probe(locked).pages, 0);   // locked: pages not read
+            QVERIFY(pdf::renderPage(locked, 0, 300, nullptr, nullptr).isNull());
+        }
     }
 
     void provider()
@@ -158,7 +208,19 @@ private Q_SLOTS:
         QQuickImageResponse *s = prov.requestImageResponse(QStringLiteral("21/0"), QSize(300, 0));
         QSignalSpy sf(s, &QQuickImageResponse::finished);
         QTRY_COMPARE_WITH_TIMEOUT(sf.size(), 1, 5000);
+        std::unique_ptr<QQuickTextureFactory> stf(s->textureFactory());
+        QVERIFY(!stf || stf->textureSize().isEmpty());
+        QVERIFY(s->errorString().isEmpty());
         s->deleteLater();
+
+        // no requested width -> default 1000
+        pools::currentGeneration() = 21;
+        QQuickImageResponse *d = prov.requestImageResponse(QStringLiteral("21/0"), QSize());
+        QSignalSpy df(d, &QQuickImageResponse::finished);
+        QTRY_COMPARE_WITH_TIMEOUT(df.size(), 1, 5000);
+        std::unique_ptr<QQuickTextureFactory> dtf(d->textureFactory());
+        QCOMPARE(dtf->textureSize().width(), 1000);
+        d->deleteLater();
     }
 };
 
