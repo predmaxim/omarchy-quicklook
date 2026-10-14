@@ -70,3 +70,6 @@ ql_test(tst_keys)
 
 target_sources(qlcore PRIVATE src/core/Image.h src/core/Image.cpp src/core/ImageStore.h src/core/ImageStore.cpp src/core/FrameAnimator.h src/core/FrameAnimator.cpp)
 ql_test(tst_image)
+
+target_sources(qlcore PRIVATE src/core/Pdf.h src/core/Pdf.cpp src/core/PdfModel.h src/core/PdfModel.cpp)
+ql_test(tst_pdf)
