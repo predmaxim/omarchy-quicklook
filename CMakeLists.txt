@@ -67,3 +67,6 @@ ql_test(tst_launcher)
 ql_test(tst_theme)
 target_sources(qlcore PRIVATE src/core/Keys.h src/core/Keys.cpp)
 ql_test(tst_keys)
+
+target_sources(qlcore PRIVATE src/core/Image.h src/core/Image.cpp src/core/ImageStore.h src/core/ImageStore.cpp src/core/FrameAnimator.h src/core/FrameAnimator.cpp)
+ql_test(tst_image)
