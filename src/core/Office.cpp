@@ -17,7 +17,10 @@ QByteArray readEntry(KZip &zip, const QString &name)
     if (!e || !e->isFile())
         return {};
     std::unique_ptr<QIODevice> dev(static_cast<const KArchiveFile *>(e)->createDevice());
-    return dev ? dev->read(kMaxPart) : QByteArray();
+    if (!dev)
+        return {};
+    const QByteArray b = dev->read(kMaxPart + 1);
+    return b.size() > kMaxPart ? QByteArray() : b;   // oversized part: absent
 }
 
 // Namespace processing is off: documents are matched by qualified name (w:sectPr, fo:page-width ...).
@@ -215,7 +218,12 @@ Header probe(const QString &path, const QString &fileName, const QByteArray &hea
         KZip zip(path);
         if (!zip.open(QIODevice::ReadOnly))
             return h;
-        const bool odf = head.mid(30, 8) == "mimetype";
+        // ODF: first entry "mimetype" whose data (after local header name+extra) is an OASIS mime type
+        bool odf = false;
+        if (head.size() >= 30 && head.mid(30, 8) == "mimetype") {
+            const int off = 30 + qFromLittleEndian<quint16>(head.constData() + 26) + qFromLittleEndian<quint16>(head.constData() + 28);
+            odf = head.mid(off).startsWith("application/vnd.oasis.opendocument");
+        }
         QSizeF s;
         if (odf) {
             h.family = Family::Odf;

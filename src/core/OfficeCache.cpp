@@ -53,6 +53,7 @@ QString OfficeCache::store(const QString &path, const QString &jobPdf)
         return {};
     const QString dst = m_dir + "/" + key + ".pdf";
     const QByteArray d = QFile::encodeName(dst);
+    ::chmod(QFile::encodeName(jobPdf).constData(), 0600);
     if (::rename(QFile::encodeName(jobPdf).constData(), d.constData()) != 0) {
         // EXDEV: copy next to the target and rename, so the final file appears atomically
         const QString part = dst + ".part";
@@ -64,15 +65,23 @@ QString OfficeCache::store(const QString &path, const QString &jobPdf)
         QFile::remove(jobPdf);
     }
     ::chmod(d.constData(), 0600);
-    evict();
+    evictExcept(kMaxBytes, dst);
     return dst;
 }
 
 void OfficeCache::evict(qint64 maxBytes)
 {
+    evictExcept(maxBytes, {});
+}
+
+void OfficeCache::evictExcept(qint64 maxBytes, const QString &keep)
+{
+    for (const auto &f : QDir(m_dir).entryInfoList({"*.part"}, QDir::Files))   // orphans of a failed copy
+        QFile::remove(f.filePath());
     QFileInfoList l = QDir(m_dir).entryInfoList({"*.pdf"}, QDir::Files);
+    l.removeIf([&](const QFileInfo &f) { return f.filePath() == keep; });
     std::sort(l.begin(), l.end(), [](const QFileInfo &a, const QFileInfo &b) { return a.lastModified() < b.lastModified(); });
-    qint64 total = 0;
+    qint64 total = keep.isEmpty() ? 0 : QFileInfo(keep).size();
     for (const auto &f : l)
         total += f.size();
     for (const auto &f : l) {

@@ -18,6 +18,7 @@ public:
     QString dir() const { return m_dir; }
 
 private:
+    void evictExcept(qint64 maxBytes, const QString &keep);
     QString m_dir;
 };
 

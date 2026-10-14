@@ -135,6 +135,16 @@ private Q_SLOTS:
         h = probe(p, "m.docx", head(p));
         QVERIFY(h.predicted && near(h.firstPagePt, 612, 792));
 
+        const QString ep = td.filePath("b.epub");
+        {
+            KZip z(ep);
+            QVERIFY(z.open(QIODevice::WriteOnly));
+            z.setCompression(KZip::NoCompression);
+            z.writeFile("mimetype", "application/epub+zip");
+            z.writeFile("styles.xml", "<x/>");
+        }
+        QVERIFY(!probe(ep, "b.epub", head(ep)).office);
+
         const QString g = td.filePath("garbage.docx");
         QFile f(g); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("this is not an office file at all"); f.close();
         QVERIFY(!probe(g, "garbage.docx", head(g)).office);
