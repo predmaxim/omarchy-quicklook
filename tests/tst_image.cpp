@@ -10,11 +10,14 @@
 #include <QPdfWriter>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 #include <fcntl.h>
+#include <sys/stat.h>
+#include <thread>
 #include <unistd.h>
 
 using namespace ql;
@@ -284,6 +287,48 @@ private Q_SLOTS:
         const int n = spy.count();
         QTest::qWait(300);
         QCOMPARE(spy.count(), n);
+    }
+    void animatorSkipsBlockedFormats()   // same guard as image::decode: an EPS never reaches Ghostscript
+    {
+        QFile::remove(p("gs-ran"));
+        ImageStore s;
+        FrameAnimator a(&s);
+        QSignalSpy spy(&a, &FrameAnimator::frameReady);
+        a.start(1, p("fake.png"), QSize(64, 64));
+        QTest::qWait(300);
+        QCOMPARE(spy.count(), 0);
+        QVERIFY(!QFile::exists(p("gs-ran")));
+    }
+    // stop() runs on the GUI thread (every switch): it must not wait for the frame being decoded. A FIFO holds the
+    // worker inside the read until the writer thread feeds it; the destructor then waits for the worker.
+    void animatorStopDoesNotWaitForDecode()
+    {
+        const QString fifo = p("slow.fifo");
+        QVERIFY(::mkfifo(QFile::encodeName(fifo).constData(), 0600) == 0);
+        QBuffer png;
+        png.open(QIODevice::WriteOnly);
+        QVERIFY(QImage(16, 16, QImage::Format_RGB32).save(&png, "PNG"));
+        std::thread writer([&] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            const int fd = ::open(QFile::encodeName(fifo).constData(), O_WRONLY);
+            if (fd >= 0) {
+                [[maybe_unused]] const auto n = ::write(fd, png.data().constData(), png.data().size());
+                ::close(fd);
+            }
+        });
+        const auto join = qScopeGuard([&] { writer.join(); });   // also when a check below fails
+        {
+            ImageStore s;
+            FrameAnimator a(&s);
+            a.start(1, fifo, QSize(64, 64));
+            QTest::qWait(50);   // the worker is blocked opening the FIFO
+            QElapsedTimer t;
+            t.start();
+            a.stop();
+            const qint64 ms = t.elapsed();
+            QVERIFY(!a.running());
+            QVERIFY2(ms < 100, qPrintable(QString::number(ms)));
+        }
     }
 };
 

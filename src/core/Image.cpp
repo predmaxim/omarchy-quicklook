@@ -10,13 +10,13 @@
 
 namespace ql::image {
 
-namespace {
-
-bool isBlocked(const QByteArray &fmt)
+bool blockedFormat(const QByteArray &fmt)
 {
     // PostScript family goes through Ghostscript in kimageformats: never.
     return fmt.isEmpty() || fmt == "eps" || fmt == "epsf" || fmt == "epsi" || fmt == "ps" || fmt == "pdf";
 }
+
+namespace {
 
 QSize fitDown(QSize s, QSize box)
 {
@@ -41,7 +41,7 @@ Header probe(const QString &path)
     Header h;
     QImageReader r(path);
     const QByteArray fmt = r.format();
-    if (isBlocked(fmt))
+    if (blockedFormat(fmt))
         return h;
     h.format = fmt;
     h.nativeScaled = fmt == "jpeg" || fmt == "jpg" || fmt == "svg" || fmt == "svgz";
@@ -113,7 +113,7 @@ QImage decode(const QString &path, const Header &header, QSize targetPx)
         return {};
     QImageReader r(path);
     const QByteArray fmt = r.format();
-    if (isBlocked(fmt))
+    if (blockedFormat(fmt))
         return {};
     if (fmt == "raw") {
         r.setQuality(0);

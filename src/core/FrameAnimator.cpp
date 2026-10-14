@@ -1,9 +1,11 @@
 #include "FrameAnimator.h"
+#include "Image.h"
 #include "ImageStore.h"
 #include <QImageReader>
 #include <QQueue>
 #include <QThread>
 #include <QTimer>
+#include <utility>
 
 namespace ql {
 
@@ -26,6 +28,10 @@ struct Worker : QObject {
     void open()
     {
         reader = std::make_unique<QImageReader>(path);
+        if (image::blockedFormat(reader->format())) {   // format() first, as image::decode: never Ghostscript
+            reader.reset();
+            return;
+        }
         reader->setAutoTransform(true);
     }
     Frame next()
@@ -33,10 +39,14 @@ struct Worker : QObject {
         if (!reader || !reader->canRead())
             open();   // loop from the start
         Frame f;
+        if (!reader)
+            return f;   // blocked: no frames
         f.delay = reader->nextImageDelay();
         f.image = reader->read();
         if (f.image.isNull()) {   // broken tail or single image: restart once
             open();
+            if (!reader)
+                return f;
             f.delay = reader->nextImageDelay();
             f.image = reader->read();
         }
@@ -55,6 +65,7 @@ struct FrameAnimator::Private {
     quint64 generation = 0;
     int token = 0;   // bumped on every start/stop; stale deliveries are dropped
     QThread *thread = nullptr;
+    QList<QThread *> retired;   // stopped, possibly still decoding a frame: deleted once finished, or by ~FrameAnimator
     Worker *worker = nullptr;
     QQueue<Frame> queue;
     QTimer timer;
@@ -112,6 +123,10 @@ FrameAnimator::FrameAnimator(ImageStore *store, QObject *parent) : QObject(paren
 FrameAnimator::~FrameAnimator()
 {
     stop();
+    for (QThread *t : std::as_const(d->retired)) {   // a worker job captures Private: it must end before d does
+        t->wait();
+        delete t;
+    }
 }
 
 void FrameAnimator::start(quint64 generation, const QString &path, QSize targetPx)
@@ -139,11 +154,13 @@ void FrameAnimator::stop()
     d->pending = false;
     d->waiting = false;
     d->worker = nullptr;
-    if (d->thread) {
-        d->thread->quit();
-        d->thread->wait();
-        delete d->thread;
-        d->thread = nullptr;
+    if (QThread *t = std::exchange(d->thread, nullptr)) {   // never waits: the frame in flight ends on its own
+        d->retired << t;
+        connect(t, &QThread::finished, this, [this, t] {   // queued: emitted on the worker thread
+            d->retired.removeOne(t);
+            delete t;   // ~QThread waits for the last instructions of run() (isInFinish)
+        });
+        t->quit();   // after the connect: a finish in between would keep t until ~FrameAnimator
     }
 }
 

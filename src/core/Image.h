@@ -20,6 +20,7 @@ struct Header {
     bool nativeScaled = false;  // jpeg, svg, svgz support ScaledSize natively
 };
 
+bool blockedFormat(const QByteArray &format);   // undetected or eps/epsf/epsi/ps/pdf: never read (Ghostscript)
 Header probe(const QString &path);
 QSize heifSize(const QString &path);     // libheif primary image size (already rotated); invalid on failure
 int rawFlip(const QString &path);        // LibRaw imgdata.sizes.flip (0, 3, 5, 6); 0 on failure
