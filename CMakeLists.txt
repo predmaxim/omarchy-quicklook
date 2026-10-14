@@ -81,3 +81,7 @@ ql_test(tst_officecache)
 target_sources(qlcore PRIVATE src/core/OfficeConverter.h src/core/OfficeConverter.cpp)
 qt_add_resources(qlcore "office" PREFIX "/" FILES resources/anchor.odt)
 ql_test(tst_officeconverter)
+
+target_sources(qlcore PRIVATE src/core/AudioTags.h src/core/AudioTags.cpp src/core/MediaController.h src/core/MediaController.cpp)
+ql_test(tst_audiotags)
+ql_test(tst_media)
