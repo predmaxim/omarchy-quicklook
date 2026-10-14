@@ -107,6 +107,26 @@ private Q_SLOTS:
         QVERIFY(!hasVideo);
         QVERIFY(!m.hasAudioOutput());
     }
+    void resumeWithNewOutputKeepsPosition()
+    {
+        // play() restarts the player to attach a new output (Qt FFmpeg opens it late otherwise): the position stays
+        MediaController m(state.get());
+        m.load(1, url("tone.mp3"));
+        QVERIFY(std::get<1>(waitLoaded(m, 1)));
+        m.activate(1, true);   // a muted audio file still plays into a (muted) output
+        QTRY_VERIFY(m.playing());
+        QVERIFY(m.hasAudioOutput());
+        QTRY_VERIFY(m.position() >= 300);
+        m.togglePlay();
+        const qint64 paused = m.position();
+        QTRY_VERIFY_WITH_TIMEOUT(!m.hasAudioOutput(), MediaController::kReleaseAudioAfterPauseMs + 1000);
+        m.togglePlay();
+        QVERIFY(m.hasAudioOutput());
+        QTest::qWait(50);
+        QVERIFY2(m.position() >= paused - 50, qPrintable(QStringLiteral("%1 < %2").arg(m.position()).arg(paused)));
+        QTRY_VERIFY(m.playing());
+        m.release();
+    }
     void garbageFails()
     {
         StderrMute mute;

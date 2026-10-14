@@ -48,7 +48,15 @@ struct MediaController::Private {
             if (!audio)
                 audio = new QAudioOutput(p->parent());
             audio->setMuted(muted);
-            p->setAudioOutput(audio);
+            if (p->audioOutput() != audio) {
+                // Qt 6.11 FFmpeg: an output attached to a paused or playing player opens its stream 2-7 s
+                // late (video frozen or silent meanwhile); a stopped one opens it at once. Restart in place.
+                const qint64 pos = p->position();
+                p->stop();
+                p->setAudioOutput(audio);
+                if (pos > 0)
+                    p->setPosition(pos);
+            }
         }
         p->play();
     }
