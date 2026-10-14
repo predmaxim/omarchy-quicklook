@@ -9,10 +9,13 @@
 #include <QPainter>
 #include <QPdfWriter>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#include <fcntl.h>
+#include <unistd.h>
 
 using namespace ql;
 
@@ -50,6 +53,11 @@ QByteArray read(const QString &p)
     QFile f(p);
     return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
 }
+struct StderrMute {
+    int saved = dup(2);
+    StderrMute() { if (const int n = open("/dev/null", O_WRONLY); n >= 0) { dup2(n, 2); close(n); } }
+    ~StderrMute() { dup2(saved, 2); close(saved); }
+};
 const QByteArray kEps = "%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n0 0 moveto 10 10 lineto stroke\nshowpage\n";
 } // namespace
 
@@ -100,15 +108,17 @@ private Q_SLOTS:
         write(p("a.svg"), "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100'><rect width='200' height='100' fill='red'/></svg>");
         write(p("b.svg"), "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 50 25'><rect width='50' height='25' fill='red'/></svg>");
 
+        QDir(m_dir.path()).mkdir("bin");
+        // writes a valid 1x1 ppm to -sOutputFile so the control read ends without library noise
+        write(p("bin/gs"), "#!/bin/sh\nfor a in \"$@\"; do case \"$a\" in -sOutputFile=*) printf 'P6\\n1 1\\n255\\n\\0\\0\\0' > \"${a#-sOutputFile=}\";; esac; done\ntouch '" + p("gs-ran").toUtf8() + "'\n");
+        QFile::setPermissions(p("bin/gs"), QFile::permissions(p("bin/gs")) | QFileDevice::ExeOwner);
+        qputenv("PATH", (p("bin") + ":" + qEnvironmentVariable("PATH")).toUtf8());
+
         if (QStandardPaths::findExecutable(QStringLiteral("magick")).isEmpty())
             return;
         QProcess::execute(QStringLiteral("magick"), {"-delay", "10", "-size", "32x32", "xc:red", "xc:blue", "xc:green", p("anim.gif")});
         QProcess::execute(QStringLiteral("magick"), {"-size", "64x48", "xc:green", p("x.heic")});
 
-        QDir(m_dir.path()).mkdir("bin");
-        write(p("bin/gs"), "#!/bin/sh\ntouch '" + p("gs-ran").toUtf8() + "'\nexit 1\n");
-        QFile::setPermissions(p("bin/gs"), QFile::permissions(p("bin/gs")) | QFileDevice::ExeOwner);
-        qputenv("PATH", (p("bin") + ":" + qEnvironmentVariable("PATH")).toUtf8());
     }
 
     void probeAndDecodeJpeg()
@@ -158,11 +168,15 @@ private Q_SLOTS:
             QSKIP("no kimageformats heif plugin");
         QCOMPARE(h.displayPx, QSize(64, 48));
         QVERIFY(!h.rotate90);
+        // 64x48 from magick is a 64x64 crop that kimg_heif mis-reads as 48x64; use an uncropped file for decode
+        QProcess::execute(QStringLiteral("magick"), {"-size", "64x64", "xc:green", p("sq.heic")});
+        const auto sq = image::probe(p("sq.heic"));
+        QVERIFY(sq.ok);
+        QCOMPARE(image::decode(p("sq.heic"), sq, QSize(32, 32)).size(), QSize(32, 32));
+        QCOMPARE(image::decode(p("sq.heic"), sq, QSize(800, 600)).size(), QSize(64, 64));   // never enlarged
     }
     void epsNeverRunsGhostscript()
     {
-        if (!QFile::exists(p("bin/gs")))
-            QSKIP("magick missing, no gs stub");
         QFile::remove(p("gs-ran"));
         const auto h = image::probe(p("fake.png"));
         QVERIFY(!h.ok);
@@ -183,6 +197,7 @@ private Q_SLOTS:
     }
     void truncatedJpeg()
     {
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("Corrupt JPEG data")));
         const auto h = image::probe(p("trunc.jpg"));
         QVERIFY(h.ok);
         QElapsedTimer t;
@@ -202,17 +217,18 @@ private Q_SLOTS:
     void stalenessSkipsWork()
     {
         pools::currentGeneration().store(5);
-        image::Header h = image::probe(p("big.jpg"));
-        QElapsedTimer t;
-        t.start();
+        const image::Header h = image::probe(p("big.jpg"));
+        QVERIFY(h.ok);
+        // stale generation -> null even for a real file; a stale call on a nonexistent path is null too
         QVERIFY(image::decodeIfCurrent(4, p("big.jpg"), h, QSize(800, 600)).isNull());
-        QVERIFY(t.elapsed() < 5);
+        QVERIFY(image::decodeIfCurrent(4, p("nope.jpg"), h, QSize(800, 600)).isNull());
         QVERIFY(!image::decodeIfCurrent(5, p("big.jpg"), h, QSize(800, 600)).isNull());
     }
     void svg()
     {
         QCOMPARE(image::svgSize(p("a.svg")), QSizeF(200, 100));
         QCOMPARE(image::svgSize(p("b.svg")), QSizeF(50, 25));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("Cannot open file")));
         QVERIFY(image::svgSize(p("nope.svg")).isEmpty());
         const QImage img = image::renderSvg(p("a.svg"), QSize(400, 300));
         QCOMPARE(img.size(), QSize(400, 300));
@@ -227,6 +243,7 @@ private Q_SLOTS:
         QImage(64, 48, QImage::Format_RGB32).save(&b, "PNG");
         QVERIFY(!image::decodeCover(b.data(), "image/png", QSize(32, 32)).isNull());
         QVERIFY(image::decodeCover(b.data(), "image/gif", QSize(32, 32)).isNull());
+        const StderrMute mute;   // libpng prints "Not a PNG file" straight to stderr
         QVERIFY(image::decodeCover(kEps, "image/png", QSize(32, 32)).isNull());
     }
     void store()

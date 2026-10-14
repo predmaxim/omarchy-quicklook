@@ -120,13 +120,27 @@ QImage decode(const QString &path, const Header &header, QSize targetPx)
         QImage img = r.read();
         if (img.isNull())
             return {};
-        switch (rawFlip(path)) {
-        case 3: img = img.transformed(QTransform().rotate(180)); break;
-        case 5: img = img.transformed(QTransform().rotate(-90)); break;
-        case 6: img = img.transformed(QTransform().rotate(90)); break;
-        default: break;
-        }
-        return finish(img.scaled(targetPx, Qt::KeepAspectRatio, Qt::SmoothTransformation), targetPx);
+        const int flip = rawFlip(path);
+        const bool swap = flip == 5 || flip == 6;
+        // only shrink, and before rotating (cheaper)
+        const QSize fit = fitDown(img.size(), swap ? targetPx.transposed() : targetPx);
+        if (fit != img.size())
+            img = img.scaled(fit, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        if (flip == 3)
+            img = img.transformed(QTransform().rotate(180));
+        else if (flip == 5)
+            img = img.transformed(QTransform().rotate(-90));
+        else if (flip == 6)
+            img = img.transformed(QTransform().rotate(90));
+        return finish(img, targetPx);
+    }
+    if (fmt == "heif" || fmt == "heic") {
+        // size()/transformation() would fully decode the file; the reader applies the rotation itself,
+        // and finish() does the downscale (no ScaledSize in kimg_heif)
+        r.setAutoTransform(true);
+        QImage img;
+        r.read(&img);
+        return finish(img, targetPx);
     }
     r.setAutoTransform(true);
     const QSize stored = r.size();
