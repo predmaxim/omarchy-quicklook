@@ -38,7 +38,7 @@ function(ql_test name)
     target_compile_definitions(${name} PRIVATE QL_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME ${name} COMMAND ${name})
     set_tests_properties(${name} PROPERTIES
-        ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM=set:offscreen;QT_QPA_PLATFORMTHEME=unset:;HYPRLAND_INSTANCE_SIGNATURE=unset:;XDG_CACHE_HOME=set:${QL_TEST_HOME}/cache;XDG_STATE_HOME=set:${QL_TEST_HOME}/state;XDG_CONFIG_HOME=set:${QL_TEST_HOME}/config;XDG_DATA_HOME=set:${QL_TEST_HOME}/data;QT_QPA_OFFSCREEN_NO_GLX=set:1;QT_QUICK_BACKEND=set:software"
+        ENVIRONMENT_MODIFICATION "QT_QPA_PLATFORM=set:offscreen;QT_QPA_PLATFORMTHEME=unset:;HYPRLAND_INSTANCE_SIGNATURE=unset:;XDG_CACHE_HOME=set:${QL_TEST_HOME}/cache;XDG_STATE_HOME=set:${QL_TEST_HOME}/state;XDG_CONFIG_HOME=set:${QL_TEST_HOME}/config;XDG_DATA_HOME=set:${QL_TEST_HOME}/data;QT_QPA_OFFSCREEN_NO_GLX=set:1;QT_QUICK_BACKEND=set:software;GIO_USE_VFS=set:local"
         LABELS "${ARGN}")
 endfunction()
 
@@ -55,3 +55,5 @@ target_sources(qlcore PRIVATE src/core/PreviewerService.h src/core/PreviewerServ
 ql_test(tst_dbus_contract)
 target_sources(qlcore PRIVATE src/core/FileInfo.h src/core/FileInfo.cpp src/core/Thumbnails.h src/core/Thumbnails.cpp)
 ql_test(tst_fileinfo)
+target_sources(qlcore PRIVATE src/core/TextDecode.h src/core/TextDecode.cpp)
+ql_test(tst_textdecode)
