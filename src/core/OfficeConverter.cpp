@@ -10,6 +10,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QUrl>
 #include <QtConcurrent>
 #include <csignal>
 #include <dirent.h>
@@ -35,7 +36,7 @@ QByteArray securityItem(const char *name, const char *value)
 
 QString userInstallationArg(const QString &profile)
 {
-    return QStringLiteral("-env:UserInstallation=file://") + profile;
+    return "-env:UserInstallation=" + QUrl::fromLocalFile(profile).toString(QUrl::FullyEncoded);   // spaces, '#' 
 }
 
 QString baseDir()
@@ -314,17 +315,19 @@ bool OfficeConverter::ensureProfileSecurity(const QString &profileDir)
     if (QFile in(path); in.open(QIODevice::ReadOnly))
         xcu = in.readAll();
 
-    auto has = [&xcu](const char *name) {
+    // the later item wins: the last one for the key must carry our value, else a corrected item is appended
+    auto effective = [&xcu](const char *name, const char *value) {
         const QByteArray prop = QByteArray("oor:name=\"") + name + '"';
+        bool ok = false;
         for (const QByteArray &line : xcu.split('\n'))
             if (line.contains("oor:path=\"" + kScriptingPath + '"') && line.contains(prop))
-                return true;
-        return false;
+                ok = line.contains(QByteArray("<value>") + value + "</value>");
+        return ok;
     };
     QByteArray missing;
-    if (!has("MacroSecurityLevel"))
+    if (!effective("MacroSecurityLevel", "3"))
         missing += securityItem("MacroSecurityLevel", "3");
-    if (!has("BlockUntrustedRefererLinks"))
+    if (!effective("BlockUntrustedRefererLinks", "true"))
         missing += securityItem("BlockUntrustedRefererLinks", "true");
     if (missing.isEmpty())
         return true;

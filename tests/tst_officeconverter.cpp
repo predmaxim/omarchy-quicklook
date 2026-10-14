@@ -10,6 +10,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QtTest>
 #include <csignal>
 #include <unistd.h>
@@ -57,6 +58,23 @@ bool hasItem(const QByteArray &xcu, const char *name, const char *value)
             && line.contains(QByteArray("<value>") + value + "</value>"))
             return true;
     return false;
+}
+
+// LibreOffice reads the items in order, the later one wins
+QByteArray lastValue(const QByteArray &xcu, const char *name)
+{
+    QByteArray v;
+    for (const QByteArray &line : xcu.split('\n'))
+        if (line.contains(kScripting.toUtf8()) && line.contains(QByteArray("oor:name=\"") + name + '"')) {
+            const qsizetype a = line.indexOf("<value>") + 7, b = line.indexOf("</value>");
+            v = line.mid(a, b - a);
+        }
+    return v;
+}
+
+QString userInstallation(const QString &profile)
+{
+    return "-env:UserInstallation=" + QUrl::fromLocalFile(profile).toString(QUrl::FullyEncoded);
 }
 
 // A .docx whose only picture is linked (not embedded) from http://127.0.0.1:<port>/x.png
@@ -124,6 +142,7 @@ private Q_SLOTS:
         if (!guarded())   // QtTest runs this even after initTestCase failed
             return;
         OfficeConverter::killOrphans(OfficeConverter::profileDir());
+        OfficeConverter::killOrphans(controlProfile());
         const QString prefix = QStringLiteral("OSL_PIPE_%1_qltest_").arg(::getuid());
         for (const QString &n : QDir(QStringLiteral("/tmp")).entryList({prefix + "*"}, QDir::System | QDir::Files))
             QFile::remove("/tmp/" + n);
@@ -157,20 +176,33 @@ private Q_SLOTS:
         QVERIFY(QDir().mkpath(p.filePath("user")));
         const QByteArray other = R"(<item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="FirstRun" oor:op="fuse"><value>false</value></prop></item>)";
         const QByteArray macro = R"(<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>2</value></prop></item>)";
-        put(p.filePath("user/registrymodifications.xcu"),
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<oor:items xmlns:oor=\"http://openoffice.org/2001/registry\" "
-            "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n"
-                + other + "\n" + macro + "\n</oor:items>\n");
+        const QByteArray blockOn = R"(<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>true</value></prop></item>)";
+        const QByteArray blockOff = R"(<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>false</value></prop></item>)";
+        const QByteArray head = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<oor:items xmlns:oor=\"http://openoffice.org/2001/registry\" "
+                                "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n";
+        const QString path = p.filePath("user/registrymodifications.xcu");
+
+        // wrong values (true then false: false wins) -> corrected items appended, the rest kept as is
+        put(path, head + other + "\n" + macro + "\n" + blockOn + "\n" + blockOff + "\n</oor:items>\n");
         QVERIFY(OfficeConverter::ensureProfileSecurity(p.path()));
-        const QByteArray xcu = readAll(p.filePath("user/registrymodifications.xcu"));
-        QVERIFY(xcu.contains(other));
-        QVERIFY(xcu.contains(macro));                                   // present key is left alone
-        QVERIFY(!hasItem(xcu, "MacroSecurityLevel", "3"));
-        QVERIFY(hasItem(xcu, "BlockUntrustedRefererLinks", "true"));   // only the missing one is added
-        QCOMPARE(xcu.count("<item "), 3);
+        QByteArray xcu = readAll(path);
+        QVERIFY(xcu.startsWith(head + other + "\n" + macro + "\n" + blockOn + "\n" + blockOff + "\n"));
+        QCOMPARE(lastValue(xcu, "MacroSecurityLevel"), QByteArray("3"));
+        QCOMPARE(lastValue(xcu, "BlockUntrustedRefererLinks"), QByteArray("true"));
+        QCOMPARE(xcu.count("<item "), 6);
         QVERIFY(xcu.trimmed().endsWith("</oor:items>"));
         QVERIFY(OfficeConverter::ensureProfileSecurity(p.path()));
-        QCOMPARE(readAll(p.filePath("user/registrymodifications.xcu")), xcu);
+        QCOMPARE(readAll(path), xcu);   // idempotent
+
+        // one key already right, the other missing -> only the missing one is added
+        const QByteArray macro3 = QByteArray(macro).replace("<value>2<", "<value>3<");
+        put(path, head + other + "\n" + macro3 + "\n</oor:items>\n");
+        QVERIFY(OfficeConverter::ensureProfileSecurity(p.path()));
+        xcu = readAll(path);
+        QVERIFY(xcu.startsWith(head + other + "\n" + macro3 + "\n"));
+        QCOMPARE(xcu.count("MacroSecurityLevel"), 1);
+        QCOMPARE(lastValue(xcu, "BlockUntrustedRefererLinks"), QByteArray("true"));
+        QCOMPARE(xcu.count("<item "), 3);
     }
 
     void killOrphansOnlyOurs()
@@ -188,7 +220,7 @@ private Q_SLOTS:
             env.insert(QStringLiteral("TMPDIR"), m_tmp.path());
             pr.setProcessEnvironment(env);
             pr.setChildProcessModifier([] { ::setpgid(0, 0); });
-            pr.start(m_stub, {QStringLiteral("--headless"), "-env:UserInstallation=file://" + profile});
+            pr.start(m_stub, {QStringLiteral("--headless"), userInstallation(profile)});
             if (pr.waitForStarted() && pr.processId() > 0)   // kill(-0) would hit the test itself
                 groups << pid_t(pr.processId());
         };
@@ -315,28 +347,26 @@ private Q_SLOTS:
 
     void externalLinkControl()
     {
-        // proves the next test can see a fetch: with the block turned off (later item wins) LibreOffice does GET
+        // proves the next test can see a fetch: plain soffice on a throwaway profile with the block turned off
+        // (the converter itself would correct that profile) does GET the linked picture
         if (!haveSoffice())
             QSKIP("soffice not installed");
-        const QString xcu = OfficeConverter::profileDir() + "/user/registrymodifications.xcu";
-        QVERIFY(OfficeConverter::ensureProfileSecurity(OfficeConverter::profileDir()));
-        QByteArray x = readAll(xcu);
-        x.replace("</oor:items>", R"(<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>false</value></prop></item>
-</oor:items>)");
-        put(xcu, x);
-        const auto restore = qScopeGuard([&xcu] { QFile::remove(xcu); });   // the next converter writes the secure profile again
-        QVERIFY(fetchesDuringConversion() > 0);
+        const int fetches = fetchesDuringConversion(true);
+        QVERIFY2(fetches > 0, qPrintable(QString::number(fetches)));
     }
 
     void externalLinkBlocked()
     {
         if (!haveSoffice())
             QSKIP("soffice not installed");
-        QCOMPARE(fetchesDuringConversion(), 0);
+        QCOMPARE(fetchesDuringConversion(false), 0);
     }
 
 private:
-    int fetchesDuringConversion()   // incoming connections, -1 if the setup or the conversion failed
+    static QString controlProfile() { return OfficeConverter::profileDir() + "-control"; }
+
+    // incoming connections, -1 if the setup or the conversion failed
+    int fetchesDuringConversion(bool control)
     {
         QTcpServer server;
         if (!server.listen(QHostAddress::LocalHost, 0))
@@ -350,14 +380,41 @@ private:
             }
         });
         const QString docx = makeLinkedDocx(m_tmp.filePath(QStringLiteral("linked-%1.docx").arg(server.serverPort())), server.serverPort());
-        OfficeCache cache(m_tmp.filePath("cache-link"));
-        OfficeConverter c(&cache, m_env);
-        QSignalSpy ok(&c, &OfficeConverter::converted), bad(&c, &OfficeConverter::failed);
         if (docx.isEmpty())
             return -1;
-        c.convert(1, docx);
-        if (!QTest::qWaitFor([&] { return ok.size() + bad.size() > 0; }, 60000) || ok.isEmpty())
-            return -1;
+        if (control) {
+            const QString xcu = controlProfile() + "/user/registrymodifications.xcu";
+            QDir(controlProfile()).removeRecursively();
+            if (!OfficeConverter::ensureProfileSecurity(controlProfile()))
+                return -1;
+            QByteArray x = readAll(xcu);
+            x.replace("</oor:items>", R"(<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>false</value></prop></item>
+</oor:items>)");
+            put(xcu, x);
+            const QString out = m_tmp.filePath(QStringLiteral("control-out"));
+            QProcess lo;
+            lo.setProcessEnvironment(m_env);
+            lo.setChildProcessModifier([] { ::setpgid(0, 0); });
+            lo.setStandardOutputFile(QProcess::nullDevice());
+            lo.setStandardErrorFile(QProcess::nullDevice());
+            const auto reap = qScopeGuard([&lo] {   // soffice.bin too, even on a timeout
+                if (const pid_t pid = pid_t(lo.processId()); pid > 0)
+                    ::kill(-pid, SIGKILL);
+                lo.waitForFinished(3000);
+            });
+            lo.start(QStringLiteral("soffice"), {QStringLiteral("--headless"), QStringLiteral("--norestore"), userInstallation(controlProfile()),
+                                                 QStringLiteral("--convert-to"), QStringLiteral("pdf"), QStringLiteral("--outdir"), out, docx});
+            if (!QTest::qWaitFor([&] { return lo.state() == QProcess::NotRunning; }, 60000)
+                || QFileInfo(out + "/" + QFileInfo(docx).completeBaseName() + ".pdf").size() <= 0)
+                return -1;
+        } else {
+            OfficeCache cache(m_tmp.filePath("cache-link"));
+            OfficeConverter c(&cache, m_env);
+            QSignalSpy ok(&c, &OfficeConverter::converted), bad(&c, &OfficeConverter::failed);
+            c.convert(1, docx);
+            if (!QTest::qWaitFor([&] { return ok.size() + bad.size() > 0; }, 60000) || ok.isEmpty())
+                return -1;
+        }
         QTest::qWait(200);   // a late fetch would still land
         return connections;
     }
