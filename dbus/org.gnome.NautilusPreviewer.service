@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.gnome.NautilusPreviewer
+Exec=/bin/false
+SystemdService=omarchy-quicklook.service

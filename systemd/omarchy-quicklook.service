@@ -1,0 +1,13 @@
+[Unit]
+Description=Quick preview for GNOME Files (omarchy-quicklook)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=org.gnome.NautilusPreviewer
+ExecStart=%h/.local/bin/omarchy-quicklook -platform wayland
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
