@@ -6,6 +6,7 @@
 #include <QMutexLocker>
 #include <QQuickImageResponse>
 #include <QQuickTextureFactory>
+#include <QCoreApplication>
 #include <QPointer>
 #include <QRunnable>
 #include <memory>
@@ -140,8 +141,10 @@ public:
                 s.error = QStringLiteral("render failed");
             }
         }
-        if (PageResponse *r = m_response.data())
-            QMetaObject::invokeMethod(r, [r, g = m_gen, p = m_page] { r->complete(g, p); }, Qt::QueuedConnection);
+        // post to the long-lived application object, never to the response: it may be gone by now
+        QMetaObject::invokeMethod(QCoreApplication::instance(),
+                                  [r = m_response, g = m_gen, p = m_page] { if (r) r->complete(g, p); },
+                                  Qt::QueuedConnection);
     }
 private:
     std::shared_ptr<PageState> m_state;
