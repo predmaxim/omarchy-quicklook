@@ -45,3 +45,5 @@ endfunction()
 # ---- sources and tests: every task appends its own lines below ----
 target_sources(qlcore PRIVATE src/core/Types.h src/core/Types.cpp src/core/Pools.h src/core/Pools.cpp)
 ql_test(tst_types)
+target_sources(qlcore PRIVATE src/core/Geometry.h src/core/Geometry.cpp)
+ql_test(tst_geometry)
