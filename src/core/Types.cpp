@@ -45,6 +45,8 @@ QString uiText(Str id, bool russian)
     case Str::NoApp: return russian ? QString::fromUtf8("Нет программы для этого типа") : QStringLiteral("No app for this type");
     case Str::Items: return russian ? QString::fromUtf8("Элементов: %1") : QStringLiteral("Items: %1");
     case Str::EmptyFile: return russian ? QString::fromUtf8("Пустой файл") : QStringLiteral("Empty file");
+    case Str::TrashFailed: return russian ? QString::fromUtf8("Не удалось переместить в корзину") : QStringLiteral("Couldn't move to Trash");
+    case Str::AlreadyInTrash: return russian ? QString::fromUtf8("Уже в корзине") : QStringLiteral("Already in Trash");
     }
     return {};
 }

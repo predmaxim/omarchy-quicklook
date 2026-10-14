@@ -38,6 +38,7 @@ class Controller : public QObject {
     Q_PROPERTY(QObject *theme READ themeObject CONSTANT)
     Q_PROPERTY(bool fullScreen READ fullScreen NOTIFY fullScreenChanged)
     Q_PROPERTY(QString hint READ hint NOTIFY hintChanged)                  // transient line ("no app"), 2 s
+    Q_PROPERTY(double zoom READ zoom NOTIFY zoomChanged)                   // 1 = default view; image/PDF size, text font
 
 public:
     Controller(PreviewerService *service, Session *session, const QProcessEnvironment &launchEnv,
@@ -72,6 +73,7 @@ public:
     QObject *themeObject() const;
     bool fullScreen() const;
     QString hint() const;
+    double zoom() const;
 
     Q_INVOKABLE void setVideoSink(QObject *videoSink);   // QML: VideoOutput.videoSink
     Q_INVOKABLE void openCurrent();                      // Enter, double click
@@ -89,6 +91,9 @@ Q_SIGNALS:
     void fullScreenChanged();
     void hintChanged();
     void scrollRequested(int action);     // int(KeyAction): PageUp, PageDown, Home, End
+    void zoomChanged();
+    void zoomStepped(double from);        // after zoomChanged, for a Ctrl +/-/0 step only (not a reset): keep the spot
+    void panRequested(int dx, int dy);    // Ctrl+arrows: -1/0/1 per axis, a tenth of the view
     void shown(quint64 generation);       // a "готово к показу" pass was applied for this generation
 
 private:

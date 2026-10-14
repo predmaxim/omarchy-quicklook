@@ -6,9 +6,22 @@ namespace ql {
 
 KeyAction mapKey(int key, quint32 nativeScanCode, Qt::KeyboardModifiers modifiers)
 {
-    if (modifiers & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
+    if (modifiers & (Qt::AltModifier | Qt::MetaModifier))
         return KeyAction::None;
+    if (modifiers & Qt::ControlModifier) {   // = - 0 and arrows sit on the same keys in us and ru
+        switch (key) {
+        case Qt::Key_Equal: case Qt::Key_Plus: return KeyAction::ZoomIn;
+        case Qt::Key_Minus: return KeyAction::ZoomOut;
+        case Qt::Key_0: return KeyAction::ZoomFit;
+        case Qt::Key_Left: return KeyAction::PanLeft;
+        case Qt::Key_Right: return KeyAction::PanRight;
+        case Qt::Key_Up: return KeyAction::PanUp;
+        case Qt::Key_Down: return KeyAction::PanDown;
+        default: return KeyAction::None;
+        }
+    }
     switch (key) {
+    case Qt::Key_Delete: return modifiers & Qt::ShiftModifier ? KeyAction::None : KeyAction::Trash;
     case Qt::Key_Space: case Qt::Key_Escape: return KeyAction::Close;
     case Qt::Key_Return: case Qt::Key_Enter: return KeyAction::Open;
     case Qt::Key_Left: return KeyAction::Left;
@@ -71,7 +84,7 @@ bool KeyRouter::eventFilter(QObject *watched, QEvent *event)
     const KeyAction a = mapKey(e->key(), e->nativeScanCode(), e->modifiers());
     if (a == KeyAction::None) return false;
     const bool oneShot = a == KeyAction::Close || a == KeyAction::Open || a == KeyAction::FullScreen
-        || a == KeyAction::PlayPause || a == KeyAction::Mute;
+        || a == KeyAction::PlayPause || a == KeyAction::Mute || a == KeyAction::Trash || a == KeyAction::ZoomFit;
     if (e->isAutoRepeat() && oneShot) return true;
     Q_EMIT action(a);
     return true;

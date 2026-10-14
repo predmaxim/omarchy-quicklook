@@ -1,4 +1,5 @@
 #include "Controller.h"
+#include "FileInfo.h"
 #include "FrameAnimator.h"
 #include "Geometry.h"
 #include "Hyprland.h"
@@ -34,7 +35,9 @@
 #include <QVideoSink>
 #include <QtConcurrent>
 #include <algorithm>
+#include <cmath>
 #include <functional>
+#include <utility>
 
 namespace ql {
 
@@ -44,6 +47,8 @@ constexpr int kGraceMs = 40;           // image decode (spec "Показ" 3)
 constexpr int kProbeBudgetMs = 80;     // SVG / PDF page 0 / office prediction
 constexpr int kMediaBudgetMs = 300;    // LoadedMedia
 constexpr int kHintMs = 2000;
+constexpr int kTrashWaitMs = 500;      // Del: how long Files may take to move its selection before we try the other way
+constexpr qint64 kMaxZoomDecodePx = 40'000'000;   // full-size decode for zoom: 160 MB at 4 bytes a pixel
 constexpr qint64 kSeekMs = 10000;
 constexpr int kCardMargin = 24;        // FileCard.qml / AudioCard.qml use the same numbers
 constexpr int kCardIcon = 96;
@@ -156,7 +161,7 @@ struct Controller::Private {
     Launcher launcher;
     KeyRouter keys;
     DoubleClicks doubleClicks;
-    QTimer loadTimer, graceTimer, budgetTimer, hintTimer;
+    QTimer loadTimer, graceTimer, budgetTimer, hintTimer, trashTimer;
     QElapsedTimer pendingSince;   // the first switch the screen has not caught up with: the grace bounds this wait
 
     ProbeResult cur;            // the current generation, as far as it got
@@ -174,7 +179,11 @@ struct Controller::Private {
     QString imageSource, placeholderSource, coverSource, cardIcon;
     QString cardName, cardType, cardDetails, cardReason, audioTitle, audioSubtitle, hint;
     bool busy = false;
-    FileInfo shownFile;         // Enter, card name
+    FileInfo shownFile;         // Enter, Del, card name
+    int zoomLevel = 0;          // zoom = 1.25^zoomLevel within the kind's range
+    double zoom = 1;
+    QString trashTarget;        // Del: waits for Files to show another file
+    bool trashTriedLeft = false;
 
     bool applied() const { return cur.generation && shownGeneration == cur.generation; }
     bool current(quint64 generation) const { return pools::isCurrent(generation) && cur.generation == generation; }
@@ -337,6 +346,8 @@ struct Controller::Private {
             window->resize(l.window);
             window->show();
         }
+        if (!again)
+            resetZoom();
         shownGeneration = generation;
         pendingSince.invalidate();
         store->dropOlderThan(generation);
@@ -385,6 +396,7 @@ struct Controller::Private {
         cardIcon.clear();
         cardReason.clear();
         busy = false;
+        resetZoom();
         store->dropOlderThan(pools::currentGeneration());
         Q_EMIT q->contentChanged();
         Q_EMIT q->imageChanged();
@@ -395,6 +407,8 @@ struct Controller::Private {
     void onDecision(const Session::Decision &decision)
     {
         pools::currentGeneration() = decision.generation;
+        if (!trashTarget.isEmpty())
+            trashNow();   // Files has moved its selection (or the preview closes): the file can go now
         graceTimer.stop();
         budgetTimer.stop();
         if (!hint.isEmpty()) {   // it was about the file that is going away
@@ -459,7 +473,7 @@ struct Controller::Private {
         case Kind::Svg:
             if (applied())
                 apply(cur, cur.layout, {});   // the 4:3 fallback is on screen: refit to the real aspect
-            startDecode(placedContent(cur));
+            startDecode((placedContent(cur).size() * cur.monitor.scale).toSize());
             return;
         case Kind::Pdf:   // also an office cache hit: the probe hands it over as Pdf with officeCachedPdf
             showPdf(cur.officeCachedPdf.isEmpty() ? cur.file.path : cur.officeCachedPdf);
@@ -501,11 +515,10 @@ struct Controller::Private {
         }
     }
 
-    void startDecode(const QRectF &rect)
+    void startDecode(QSize px)
     {
         const quint64 generation = cur.generation;
         const QString path = cur.file.path;
-        const QSize px = (rect.size() * cur.monitor.scale).toSize();
         decodedPx = px;
         auto job = cur.kind == Kind::Svg
             ? QtConcurrent::run(pools::heavy(), [generation, path, px] {
@@ -558,7 +571,94 @@ struct Controller::Private {
             return;
         const QSize px = (contentRect.size() * scale).toSize();
         if (px.width() > decodedPx.width() || px.height() > decodedPx.height())
-            startDecode(contentRect);
+            startDecode(px);
+    }
+
+    geometry::ZoomRange zoomRange() const
+    {
+        return busy ? geometry::ZoomRange() : geometry::zoomRange(kind, natural, scale, contentRect.size());
+    }
+
+    void setZoomLevel(int level)   // a Ctrl +/-/0 step
+    {
+        const double from = zoom;
+        zoomLevel = level;
+        zoom = geometry::zoomAt(level, zoomRange());
+        if (zoom == from)
+            return;
+        Q_EMIT q->zoomChanged();
+        Q_EMIT q->zoomStepped(from);
+        if (zoom > 1)
+            decodeForZoom();
+    }
+
+    void resetZoom()
+    {
+        zoomLevel = 0;
+        if (zoom == 1)
+            return;
+        zoom = 1;
+        Q_EMIT q->zoomChanged();
+    }
+
+    // The first zoom past the fit: decode once at the size the deepest zoom shows (an image at most at its own
+    // size); animations keep their fitted frames.
+    void decodeForZoom()
+    {
+        if ((kind != Kind::Image && kind != Kind::Svg) || !applied() || cur.kind != kind || animator.running()
+            || imageSource.isEmpty())
+            return;
+        QSize px = (contentRect.size() * zoomRange().max * scale).toSize();
+        if (kind == Kind::Image)
+            px = px.boundedTo(cur.image.displayPx);
+        const qint64 area = qint64(px.width()) * px.height();
+        if (area > kMaxZoomDecodePx)   // ponytail: one capped decode, tiles if 40 MP+ photos must be pin-sharp
+            px = (QSizeF(px) * std::sqrt(double(kMaxZoomDecodePx) / area)).toSize();
+        if (px.width() > decodedPx.width() || px.height() > decodedPx.height())
+            startDecode(px);
+    }
+
+    void showHint(Str id)
+    {
+        hint = uiText(id);
+        Q_EMIT q->hintChanged();
+        hintTimer.start();
+    }
+
+    // Del: Files loses its selection when the selected file vanishes, so it moves on first (right, then left at
+    // the end of the list); the file goes to the Trash once Files shows another one. The only file: trash, close.
+    void trashCurrent()
+    {
+        if (!applied() || !trashTarget.isEmpty() || shownFile.uri.isEmpty())
+            return;
+        if (QUrl(shownFile.uri).scheme() == QLatin1String("trash"))
+            return showHint(Str::AlreadyInTrash);
+        trashTarget = shownFile.path.isEmpty() ? shownFile.uri : shownFile.path;
+        trashTriedLeft = false;
+        service->emitSelectionEvent(selectionDirection(KeyAction::Right));
+        trashTimer.start();
+    }
+
+    void onTrashWait()
+    {
+        if (!trashTriedLeft) {
+            trashTriedLeft = true;
+            service->emitSelectionEvent(selectionDirection(KeyAction::Left));
+            trashTimer.start();
+            return;
+        }
+        trashNow();
+        service->requestClose();
+    }
+
+    void trashNow()
+    {
+        trashTimer.stop();
+        QtConcurrent::run(pools::probe(), [target = std::exchange(trashTarget, QString())] { return trashFile(target); })
+            .then(q, [this](bool ok) {
+                if (!ok)
+                    showHint(Str::TrashFailed);
+            });
     }
 
     void showPdf(const QString &pdfPath)
@@ -656,6 +756,7 @@ struct Controller::Private {
         if (full == fullScreen || (full && !window->isVisible()))
             return;
         fullScreen = full;
+        resetZoom();   // the fit changes with the window
         if (!full) {   // back to the current file's own size, also after a switch made in full screen
             setWindowSize(layout.window);
             window->resize(layout.window);
@@ -706,6 +807,28 @@ struct Controller::Private {
             if (kind == Kind::Video || kind == Kind::Audio)   // the remembered mute is about media only
                 media.toggleMute();
             break;
+        case KeyAction::Trash:
+            trashCurrent();
+            break;
+        case KeyAction::ZoomIn:
+            if (zoom < zoomRange().max)
+                setZoomLevel(zoomLevel + 1);
+            break;
+        case KeyAction::ZoomOut:
+            if (zoom > zoomRange().min)
+                setZoomLevel(zoomLevel - 1);
+            break;
+        case KeyAction::ZoomFit:
+            setZoomLevel(0);
+            break;
+        case KeyAction::PanLeft:
+        case KeyAction::PanRight:
+        case KeyAction::PanUp:
+        case KeyAction::PanDown:
+            if (zoomRange().max > 1)   // zoomable content only: images, PDF, text
+                Q_EMIT q->panRequested(action == KeyAction::PanLeft ? -1 : action == KeyAction::PanRight ? 1 : 0,
+                                       action == KeyAction::PanUp ? -1 : action == KeyAction::PanDown ? 1 : 0);
+            break;
         case KeyAction::None:
             break;
         }
@@ -724,6 +847,9 @@ Controller::Controller(PreviewerService *service, Session *session, const QProce
     d->budgetTimer.setSingleShot(true);
     d->hintTimer.setSingleShot(true);
     d->hintTimer.setInterval(kHintMs);
+    d->trashTimer.setSingleShot(true);
+    d->trashTimer.setInterval(kTrashWaitMs);
+    connect(&d->trashTimer, &QTimer::timeout, this, [this] { d->onTrashWait(); });
     connect(service, &PreviewerService::decided, this, [this](const Session::Decision &decision) { d->onDecision(decision); });
     connect(&d->loadTimer, &QTimer::timeout, this, [this] { d->startLoad(); });
     connect(&d->graceTimer, &QTimer::timeout, this, [this] { d->onGrace(); });
@@ -804,6 +930,7 @@ QObject *Controller::mediaObject() const { return &d->media; }
 QObject *Controller::themeObject() const { return &d->theme; }
 bool Controller::fullScreen() const { return d->fullScreen; }
 QString Controller::hint() const { return d->hint; }
+double Controller::zoom() const { return d->zoom; }
 
 void Controller::setVideoSink(QObject *videoSink) { d->media.setOutputSink(qobject_cast<QVideoSink *>(videoSink)); }
 
@@ -816,9 +943,7 @@ void Controller::openCurrent()
         d->service->requestClose();
         break;
     case Launcher::Result::NoApp:
-        d->hint = uiText(Str::NoApp);
-        Q_EMIT hintChanged();
-        d->hintTimer.start();
+        d->showHint(Str::NoApp);
         break;
     case Launcher::Result::Failed:
         break;

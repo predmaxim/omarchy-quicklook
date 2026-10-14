@@ -1,7 +1,8 @@
 import QtQuick
 
 // Thin bar at the right edge while the flickable moves, fading out 1 s later. It also performs the keyboard
-// scrolling of its flickable (PgUp/PgDn/Home/End arrive as ql.scrollRequested), so the views share one copy.
+// scrolling of its flickable (PgUp/PgDn/Home/End arrive as ql.scrollRequested, Ctrl+arrows as ql.panRequested),
+// so the views share one copy.
 Rectangle {
     id: bar
     required property Flickable flickable
@@ -45,6 +46,16 @@ Rectangle {
                 f.positionViewAtBeginning()
             else if (action === 10)
                 f.positionViewAtEnd()
+        }
+        function onPanRequested(dx, dy) {   // a tenth of the view, within the content
+            const f = bar.flickable
+            if (dx !== 0 && f.contentWidth > f.width)
+                f.contentX = Math.max(f.originX, Math.min(f.originX + f.contentWidth - f.width, f.contentX + dx * f.width / 10))
+            if (dy !== 0) {
+                const top = f.originY - f.topMargin
+                const bottom = Math.max(top, f.originY + f.contentHeight + f.bottomMargin - f.height)
+                f.contentY = Math.max(top, Math.min(bottom, f.contentY + dy * f.height / 10))
+            }
         }
     }
 }

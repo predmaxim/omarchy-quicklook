@@ -51,6 +51,25 @@ private Q_SLOTS:
         row("ru M (soft)", u'Ь', 58, none, KeyAction::Mute);
         row("ru other scan", u'Ы', 28, none, KeyAction::None);
         row("punctuation not by scan", Qt::Key_Apostrophe, 24, none, KeyAction::None);
+        row("delete", Qt::Key_Delete, 119, none, KeyAction::Trash);
+        row("keypad delete", Qt::Key_Delete, 91, Qt::KeypadModifier, KeyAction::Trash);
+        row("shift+delete", Qt::Key_Delete, 119, Qt::ShiftModifier, KeyAction::None);
+        row("ctrl+delete", Qt::Key_Delete, 119, Qt::ControlModifier, KeyAction::None);
+        const int ctrl = Qt::ControlModifier;
+        row("ctrl+=", Qt::Key_Equal, 21, ctrl, KeyAction::ZoomIn);
+        row("ctrl+shift+= (+)", Qt::Key_Plus, 21, ctrl | Qt::ShiftModifier, KeyAction::ZoomIn);
+        row("ctrl+keypad +", Qt::Key_Plus, 86, ctrl | Qt::KeypadModifier, KeyAction::ZoomIn);
+        row("ctrl+-", Qt::Key_Minus, 20, ctrl, KeyAction::ZoomOut);
+        row("ctrl+keypad -", Qt::Key_Minus, 82, ctrl | Qt::KeypadModifier, KeyAction::ZoomOut);
+        row("ctrl+0", Qt::Key_0, 19, ctrl, KeyAction::ZoomFit);
+        row("ctrl+left", Qt::Key_Left, 113, ctrl, KeyAction::PanLeft);
+        row("ctrl+right", Qt::Key_Right, 114, ctrl, KeyAction::PanRight);
+        row("ctrl+up", Qt::Key_Up, 111, ctrl, KeyAction::PanUp);
+        row("ctrl+down", Qt::Key_Down, 116, ctrl, KeyAction::PanDown);
+        row("plain = is not zoom", Qt::Key_Equal, 21, none, KeyAction::None);
+        row("plain - is not zoom", Qt::Key_Minus, 20, none, KeyAction::None);
+        row("ctrl+alt+=", Qt::Key_Equal, 21, ctrl | Qt::AltModifier, KeyAction::None);
+        row("ctrl+meta+left", Qt::Key_Left, 113, ctrl | Qt::MetaModifier, KeyAction::None);
         row("ctrl+Q", Qt::Key_Q, 24, Qt::ControlModifier, KeyAction::None);
         row("alt+space", Qt::Key_Space, 65, Qt::AltModifier, KeyAction::None);
         row("meta+left", Qt::Key_Left, 113, Qt::MetaModifier, KeyAction::None);
@@ -95,6 +114,8 @@ private Q_SLOTS:
         QVERIFY(send(Qt::Key_Left, 113, true));   // arrows repeat
         QCOMPARE(got, QList<KeyAction>{KeyAction::Left});
         got.clear();
+        QVERIFY(send(Qt::Key_Delete, 119, true));   // held Del trashes one file, not a folder
+        QVERIFY(got.isEmpty());
         QVERIFY(!send(Qt::Key_A, 38, false));
         QVERIFY(got.isEmpty());
     }

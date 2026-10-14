@@ -10,7 +10,8 @@ namespace ql {
 
 enum class Kind { None, Image, Svg, Pdf, Office, Text, Video, Audio, FileCard, FolderCard };
 enum class CardReason { None, CannotOpen, PasswordProtected, ConversionFailed, TooLarge };
-enum class Str { CannotOpen, PasswordProtected, ConversionFailed, TooLarge, NoApp, Items, EmptyFile };
+enum class Str { CannotOpen, PasswordProtected, ConversionFailed, TooLarge, NoApp, Items, EmptyFile, TrashFailed,
+                 AlreadyInTrash };
 
 struct Monitor {
     QString name;

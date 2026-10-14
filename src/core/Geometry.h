@@ -33,4 +33,14 @@ QRectF fullscreenContent(Kind kind, QSize screen, QSizeF natural, double scale);
         // Image: natural px/scale, 1:1 centered if it fits, else fitDown; Svg: fit; Video: fit (enlarge);
         // Pdf/Office: pageRect(screen, natural); Text: whole screen; cards: cardRectIn(screen, kind)
 
+// Zoom (Ctrl +/-/0): level n shows 1.25^n of the default view, clamped to the kind's range.
+inline constexpr double kZoomStep = 1.25;
+struct ZoomRange {
+    double min = 1, max = 1;
+};
+ZoomRange zoomRange(Kind kind, QSizeF natural, double scale, QSizeF content);
+        // Image: [1, 8x of 1:1 (natural px / scale) over the fitted content, at least 1]; Svg: [1, 8];
+        // Pdf/Office: [1, 4]; Text (font size): [1.25^-2, 3]; others, or no content yet: [1, 1]
+double zoomAt(int level, ZoomRange range);   // clamp(1.25^level, min, max)
+
 } // namespace ql::geometry

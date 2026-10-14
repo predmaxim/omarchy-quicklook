@@ -11,6 +11,7 @@
 #include <QDBusConnection>
 #include <QDir>
 #include <QFile>
+#include <QFont>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QImage>
@@ -608,6 +609,160 @@ private Q_SLOTS:
         QVERIFY(!m_controller->fullScreen());
         m_window->resize(l.window);
         QTRY_COMPARE(m_controller->contentRect(), l.content);
+    }
+    void zoomImage()   // Ctrl+= zooms around the center, decodes at full size once, Ctrl+arrows pan, Ctrl+0 fits
+    {
+        QVERIFY(writePng(file(u"big.png"_s), QSize(3000, 2000)));
+        QVERIFY(show(file(u"big.png"_s)) != 0);
+        auto *main = m_window->findChild<QQuickItem *>(u"mainImage"_s);
+        auto *flick = m_window->findChild<QQuickItem *>(u"imageFlick"_s);
+        QVERIFY(main && flick);
+        QTRY_COMPARE(main->property("status").toInt(), 1);
+        const QRectF fit = m_controller->contentRect();
+        QVERIFY(main->implicitWidth() < 3000);   // decoded for the fitted rect
+        QCOMPARE(m_controller->zoom(), 1.0);
+        QTest::keyClick(m_window, Qt::Key_Minus, Qt::ControlModifier);   // below the fit: nothing
+        QCOMPARE(m_controller->zoom(), 1.0);
+        QTest::keyClick(m_window, Qt::Key_Equal, Qt::ControlModifier);
+        QTest::keyClick(m_window, Qt::Key_Plus, Qt::ControlModifier | Qt::KeypadModifier);
+        QCOMPARE(m_controller->zoom(), 1.5625);
+        QCOMPARE(main->width(), fit.width() * 1.5625);
+        QCOMPARE(m_controller->contentRect(), fit);   // the window and its rect stay
+        QCOMPARE(m_window->size(), m_controller->currentLayout().window);
+        QTRY_COMPARE(main->implicitWidth(), 3000.0);   // sharp: the full image replaced the fitted one
+        const qreal centerX = flick->property("contentX").toReal();
+        QVERIFY(centerX > 0);   // zoomed around the middle, not the corner
+        QTest::keyClick(m_window, Qt::Key_Right, Qt::ControlModifier);
+        QVERIFY(flick->property("contentX").toReal() > centerX);
+        QCOMPARE(m_controller->kind(), u"image"_s);   // Ctrl+arrow is no file switch
+        for (int i = 0; i < 50; ++i)
+            QTest::keyClick(m_window, Qt::Key_Right, Qt::ControlModifier);
+        QCOMPARE(flick->property("contentX").toReal(),
+                 flick->property("contentWidth").toReal() - flick->width());   // stops at the edge
+        QTest::keyClick(m_window, Qt::Key_0, Qt::ControlModifier);
+        QCOMPARE(m_controller->zoom(), 1.0);
+        QCOMPARE(QRectF(main->x(), main->y(), main->width(), main->height()), fit);
+        QCOMPARE(flick->property("contentX").toReal(), 0.0);
+    }
+    void zoomResetsOnSwitch()
+    {
+        QVERIFY(show(file(u"photo.png"_s)) != 0);
+        QTest::keyClick(m_window, Qt::Key_Equal, Qt::ControlModifier);
+        QCOMPARE(m_controller->zoom(), 1.25);
+        QVERIFY(show(file(u"notes.txt"_s), false) != 0);
+        QCOMPARE(m_controller->zoom(), 1.0);
+    }
+    void zoomText()   // the font grows and shrinks (10..48 px), rows keep the window's width
+    {
+        QVERIFY(show(file(u"notes.txt"_s)) != 0);
+        auto *list = m_window->findChild<QQuickItem *>(u"textList"_s);
+        QTRY_VERIFY(itemAt(list, 0));
+        const auto px = [&] { return itemAt(list, 0)->property("font").value<QFont>().pixelSize(); };
+        QCOMPARE(px(), 16);
+        QTest::keyClick(m_window, Qt::Key_Equal, Qt::ControlModifier);
+        QTRY_COMPARE(px(), 20);
+        for (int i = 0; i < 10; ++i)
+            QTest::keyClick(m_window, Qt::Key_Equal, Qt::ControlModifier);
+        QTRY_COMPARE(px(), 48);
+        QTest::keyClick(m_window, Qt::Key_0, Qt::ControlModifier);
+        for (int i = 0; i < 10; ++i)
+            QTest::keyClick(m_window, Qt::Key_Minus, Qt::ControlModifier);
+        QTRY_COMPARE(px(), 10);
+        QCOMPARE(itemAt(list, 0)->property("width").toReal(), list->width() - 32);
+    }
+    void zoomPdf()   // pages grow past the window: horizontal panning, the window keeps its size
+    {
+        QVERIFY(show(file(u"real.pdf"_s)) != 0);
+        QTRY_COMPARE(m_controller->kind(), u"pdf"_s);
+        auto *list = m_window->findChild<QQuickItem *>(u"pdfList"_s);
+        QTRY_VERIFY(itemAt(list, 0));
+        auto *page = itemAt(list, 0)->findChild<QQuickItem *>(u"pageImage"_s);
+        const qreal fitWidth = page->width();
+        for (int i = 0; i < 3; ++i)
+            QTest::keyClick(m_window, Qt::Key_Equal, Qt::ControlModifier);
+        QCOMPARE(m_controller->zoom(), 1.953125);
+        QTRY_COMPARE(page->width(), fitWidth * 1.953125);
+        QVERIFY(list->property("contentWidth").toReal() > list->width());
+        const qreal x0 = list->property("contentX").toReal();
+        QTest::keyClick(m_window, Qt::Key_Right, Qt::ControlModifier);
+        QVERIFY(list->property("contentX").toReal() > x0);
+        for (int i = 0; i < 10; ++i)
+            QTest::keyClick(m_window, Qt::Key_Equal, Qt::ControlModifier);
+        QCOMPARE(m_controller->zoom(), 4.0);
+        QTRY_COMPARE(page->property("status").toInt(), 1);
+    }
+    void noZoomForMedia()
+    {
+        if (!m_haveMedia)
+            QSKIP("ffmpeg missing");
+        QVERIFY(show(file(u"a.mp4"_s)) != 0);
+        QTest::keyClick(m_window, Qt::Key_Equal, Qt::ControlModifier);
+        QCOMPARE(m_controller->zoom(), 1.0);
+    }
+private:
+    // Del: Files moves its selection first (right, then left at the end), then the file goes to the Trash
+    QString trashable(const QString &name)
+    {
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + u"/trash-test"_s;
+        QDir().mkpath(dir);   // on the test home's file system: GIO trashes into $XDG_DATA_HOME/Trash
+        QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + u"/Trash"_s).removeRecursively();
+            // an earlier run's info files would make GIO pick "name.2.txt"
+        const QString path = dir + u'/' + name;
+        return writeFile(path, "bye\n") ? path : QString();
+    }
+    QString trashed(const QString &name) const
+    {
+        return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + u"/Trash/files/"_s + name;
+    }
+private Q_SLOTS:
+    void deleteMovesToNextThenTrashes()
+    {
+        const QString path = trashable(u"del-next.txt"_s);
+        QVERIFY(show(path) != 0);
+        QSignalSpy spy(m_service.get(), &PreviewerService::selectionEvent);
+        QTest::keyClick(m_window, Qt::Key_Delete);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.at(0).at(0).toUInt(), 5u);
+        QVERIFY(QFile::exists(path));   // not before Files has moved on: it would lose its selection
+        QVERIFY(show(file(u"notes.txt"_s), false) != 0);   // Files answers with the next file
+        QTRY_VERIFY(!QFile::exists(path));
+        QVERIFY(QFile::exists(trashed(u"del-next.txt"_s)));
+        QCOMPARE(m_controller->kind(), u"text"_s);
+        QVERIFY(m_session.visible());
+        QTest::qWait(1200);
+        QCOMPARE(spy.count(), 1);   // nothing more pending
+    }
+    void deleteLastFileTriesLeftThenCloses()
+    {
+        const QString path = trashable(u"del-only.txt"_s);
+        QVERIFY(show(path) != 0);
+        QSignalSpy spy(m_service.get(), &PreviewerService::selectionEvent);
+        QTest::keyClick(m_window, Qt::Key_Delete);
+        QTest::keyClick(m_window, Qt::Key_Delete);   // a second Del while waiting: ignored
+        QTRY_COMPARE(spy.count(), 2);
+        QCOMPARE(spy.at(1).at(0).toUInt(), 4u);
+        QTRY_VERIFY(!m_session.visible());   // the only file: trashed and closed
+        QTRY_VERIFY(!QFile::exists(path));
+        QVERIFY(QFile::exists(trashed(u"del-only.txt"_s)));
+        QCOMPARE(spy.count(), 2);
+    }
+    void deleteFailureHints()
+    {
+        const QString path = trashable(u"del-gone.txt"_s);
+        QVERIFY(show(path) != 0);
+        QVERIFY(QFile::remove(path));   // vanished meanwhile: g_file_trash fails
+        QTest::keyClick(m_window, Qt::Key_Delete);
+        QVERIFY(show(file(u"notes.txt"_s), false) != 0);
+        QTRY_COMPARE(m_controller->hint(), uiText(Str::TrashFailed));
+    }
+    void deleteInTrashHints()
+    {
+        QSignalSpy spy(m_service.get(), &PreviewerService::selectionEvent);
+        m_service->handleShowFile(u"trash:///del-in-trash.txt"_s, QString(), true, QString());
+        QTRY_VERIFY(m_controller->windowShown());
+        QTest::keyClick(m_window, Qt::Key_Delete);
+        QCOMPARE(m_controller->hint(), uiText(Str::AlreadyInTrash));
+        QCOMPARE(spy.count(), 0);
     }
 };
 

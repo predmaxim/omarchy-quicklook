@@ -140,6 +140,42 @@ private Q_SLOTS:
         const Monitor m{"m", {2048, 1235}, 2.4}; // exact box aspect
         QVERIFY(imageLayout({9215, 5555}, m).window.height() <= box(m).height());
     }
+    void zoomRanges()
+    {
+        // 4000 px at 1.25 is 3200 logical at 1:1; fitted into 1600 -> 1:1 is 2x the fit, 8x of 1:1 is 16x
+        ZoomRange r = zoomRange(Kind::Image, QSizeF(4000, 3000), 1.25, QSizeF(1600, 1200));
+        QVERIFY(near(r.min, 1) && near(r.max, 16));
+        r = zoomRange(Kind::Image, QSizeF(100, 100), 1.0, QSizeF(100, 100));   // shown 1:1 already
+        QVERIFY(near(r.min, 1) && near(r.max, 8));
+        r = zoomRange(Kind::Image, QSizeF(100, 100), 1.0, QSizeF());           // nothing laid out yet
+        QVERIFY(near(r.min, 1) && near(r.max, 1));
+        r = zoomRange(Kind::Svg, QSizeF(24, 24), 1.25, QSizeF(240, 240));
+        QVERIFY(near(r.min, 1) && near(r.max, 8));
+        r = zoomRange(Kind::Pdf, QSizeF(595, 842), 1.25, QSizeF(800, 1131));
+        QVERIFY(near(r.min, 1) && near(r.max, 4));
+        r = zoomRange(Kind::Office, {}, 1.25, {});
+        QVERIFY(near(r.max, 4));
+        r = zoomRange(Kind::Text, {}, 1.25, QSizeF(800, 600));
+        QVERIFY(near(r.min, 0.64) && near(r.max, 3));
+        for (Kind k : {Kind::Video, Kind::Audio, Kind::FileCard, Kind::FolderCard, Kind::None}) {
+            r = zoomRange(k, QSizeF(640, 360), 1.0, QSizeF(640, 360));
+            QVERIFY(near(r.min, 1) && near(r.max, 1));
+        }
+    }
+    void zoomLevels()
+    {
+        const ZoomRange pdf{1, 4}, text{0.64, 3};
+        QVERIFY(near(zoomAt(0, pdf), 1));
+        QVERIFY(near(zoomAt(1, pdf), 1.25));
+        QVERIFY(near(zoomAt(2, pdf), 1.5625));
+        QVERIFY(near(zoomAt(10, pdf), 4));    // clamped to the top
+        QVERIFY(near(zoomAt(-1, pdf), 1));    // never below the fit
+        QVERIFY(near(zoomAt(-1, text), 0.8));
+        QVERIFY(near(zoomAt(-2, text), 0.64));
+        QVERIFY(near(zoomAt(-3, text), 0.64));
+        QVERIFY(near(zoomAt(5, text), 3));
+        QVERIFY(near(zoomAt(3, ZoomRange{}), 1));   // no zoom for this kind
+    }
 };
 
 QTEST_APPLESS_MAIN(TstGeometry)

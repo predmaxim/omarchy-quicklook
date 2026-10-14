@@ -155,4 +155,10 @@ Kind classify(const FileInfo &info)
     return looksLikeText(mime, info.head) ? Kind::Text : Kind::FileCard;
 }
 
+bool trashFile(const QString &pathOrUri)
+{
+    g_autoptr(GFile) file = g_file_new_for_commandline_arg(pathOrUri.toUtf8().constData());
+    return g_file_trash(file, nullptr, nullptr);
+}
+
 } // namespace ql
