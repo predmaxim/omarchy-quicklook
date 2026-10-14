@@ -17,6 +17,7 @@ Item {
         anchors.fill: parent
         model: ql.pdf
         spacing: 8
+        cacheBuffer: 0   // no asynchronous buffer incubation: a reset during it makes DelegateModel warn
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         keyNavigationEnabled: false

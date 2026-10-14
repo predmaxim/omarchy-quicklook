@@ -127,7 +127,7 @@ struct DoubleClicks : QObject {
 };
 
 struct Sources {
-    QString image, placeholder, cover;
+    QString image{}, placeholder{}, cover{};   // {} : designated initializers may omit them without a warning
     bool busy = false;
 };
 
@@ -428,7 +428,7 @@ struct Controller::Private {
         if (!pools::isCurrent(cur.generation) || applied())
             return;
         const bool video = cur.kind == Kind::Video;
-        apply(cur, fallbackFor(cur), {QString(), video ? put("placeholder", cur.placeholder) : QString()});
+        apply(cur, fallbackFor(cur), {.placeholder = video ? put("placeholder", cur.placeholder) : QString()});
         if (video)
             media.activate(cur.generation, false);   // the previous player must not keep playing behind it
     }
@@ -452,7 +452,7 @@ struct Controller::Private {
             showPdf(cur.officeCachedPdf.isEmpty() ? cur.file.path : cur.officeCachedPdf);
             return;
         case Kind::Office:   // cache miss: white paper, type icon, name, busy indicator until the PDF is ready
-            apply(cur, cur.layout, {QString(), put("placeholder", cur.placeholder), QString(), true});
+            apply(cur, cur.layout, {.placeholder = put("placeholder", cur.placeholder), .busy = true});
             converter.convert(generation, cur.file.path);
             return;
         case Kind::Text: {
@@ -470,7 +470,7 @@ struct Controller::Private {
             return;
         }
         case Kind::Audio:
-            apply(cur, cur.layout, {QString(), QString(), put("cover", d.cover)});
+            apply(cur, cur.layout, {.cover = put("cover", d.cover)});
             media.load(generation, QUrl::fromLocalFile(cur.file.path));
             media.activate(generation, true);
             return;
@@ -510,7 +510,7 @@ struct Controller::Private {
     {
         if (!pools::isCurrent(cur.generation) || applied())
             return;
-        apply(cur, cur.layout, {QString(), put("placeholder", cur.placeholder)});
+        apply(cur, cur.layout, {.placeholder = put("placeholder", cur.placeholder)});
     }
 
     void onDecoded(quint64 generation, const QImage &image)
@@ -526,7 +526,7 @@ struct Controller::Private {
         const QString source = store->put(generation, QStringLiteral("main"), image);
         if (!applied()) {
             graceTimer.stop();
-            apply(cur, cur.layout, {source});
+            apply(cur, cur.layout, {.image = source});
         } else {
             imageSource = source;
             Q_EMIT q->imageChanged();
@@ -550,7 +550,7 @@ struct Controller::Private {
     {
         const quint64 generation = cur.generation;
         const pdf::Header h = cur.pdf;
-        apply(cur, cur.layout, {QString(), put("placeholder", cur.placeholder)},
+        apply(cur, cur.layout, {.placeholder = put("placeholder", cur.placeholder)},
               [&] { pdfModel.setDocument(generation, pdfPath, h.pages, h.firstPagePt); });
     }
 
@@ -589,7 +589,7 @@ struct Controller::Private {
             videoSize = size;
             const bool active = applied();   // the 16:9 fallback activated it already
             apply(cur, geometry::videoLayout(size, cur.monitor),
-                  {QString(), active ? placeholderSource : put("placeholder", cur.placeholder)});
+                  {.placeholder = active ? placeholderSource : put("placeholder", cur.placeholder)});
             if (!active)
                 media.activate(generation, false);   // again would re-arm autoplay and undo a K pause
             return;
@@ -600,7 +600,7 @@ struct Controller::Private {
                     return;
                 cur = std::move(d.r);
                 cur.kind = Kind::Audio;
-                apply(cur, geometry::cardLayout(Kind::Audio), {QString(), QString(), put("cover", d.cover)});
+                apply(cur, geometry::cardLayout(Kind::Audio), {.cover = put("cover", d.cover)});
                 media.activate(cur.generation, true);
             });
     }

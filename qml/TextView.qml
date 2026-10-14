@@ -10,6 +10,7 @@ Item {
         topMargin: 16
         bottomMargin: 16
         reuseItems: true
+        cacheBuffer: 0   // no asynchronous buffer incubation: a reset during it makes DelegateModel warn
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         keyNavigationEnabled: false
