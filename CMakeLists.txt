@@ -65,3 +65,5 @@ target_sources(qlcore PRIVATE src/core/Theme.h src/core/Theme.cpp src/core/State
 ql_test(tst_statestore)
 ql_test(tst_launcher)
 ql_test(tst_theme)
+target_sources(qlcore PRIVATE src/core/Keys.h src/core/Keys.cpp)
+ql_test(tst_keys)
