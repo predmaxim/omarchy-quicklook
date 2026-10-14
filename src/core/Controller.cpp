@@ -19,6 +19,7 @@
 #include <KSyntaxHighlighting/Repository>
 #include <KZip>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QFontMetricsF>
 #include <QIcon>
 #include <QImageReader>
@@ -32,6 +33,7 @@
 #include <QTimer>
 #include <QVideoSink>
 #include <QtConcurrent>
+#include <algorithm>
 #include <functional>
 
 namespace ql {
@@ -155,6 +157,7 @@ struct Controller::Private {
     KeyRouter keys;
     DoubleClicks doubleClicks;
     QTimer loadTimer, graceTimer, budgetTimer, hintTimer;
+    QElapsedTimer pendingSince;   // the first switch the screen has not caught up with: the grace bounds this wait
 
     ProbeResult cur;            // the current generation, as far as it got
     QSize videoSize;            // cur: from LoadedMedia
@@ -285,7 +288,7 @@ struct Controller::Private {
             details << formatDate(r.file.modified, ru);
         cardDetails = details.join(QStringLiteral(" · "));
         const QIcon icon = QIcon::fromTheme(mime.iconName(), QIcon::fromTheme(mime.genericIconName()));
-        const int px = qRound(kCardIcon * r.monitor.scale);
+        const int px = qRound((r.kind == Kind::Audio ? kCoverSide : kCardIcon) * r.monitor.scale);   // audio: in the cover's place
         if (!icon.isNull())
             cardIcon = store->put(r.generation, QStringLiteral("icon"), icon.pixmap(QSize(px, px)).toImage());
         if (r.kind == Kind::Audio) {
@@ -335,6 +338,7 @@ struct Controller::Private {
             window->show();
         }
         shownGeneration = generation;
+        pendingSince.invalidate();
         store->dropOlderThan(generation);
         Q_EMIT q->contentChanged();
         Q_EMIT q->imageChanged();
@@ -393,10 +397,19 @@ struct Controller::Private {
         pools::currentGeneration() = decision.generation;
         graceTimer.stop();
         budgetTimer.stop();
-        if (decision.effect == Session::Effect::Close)
+        if (!hint.isEmpty()) {   // it was about the file that is going away
+            hintTimer.stop();
+            hint.clear();
+            Q_EMIT q->hintChanged();
+        }
+        if (decision.effect == Session::Effect::Close) {
+            pendingSince.invalidate();
             hidePreview();
-        else if (decision.effect == Session::Effect::Open || decision.effect == Session::Effect::Switch)
+        } else if (decision.effect == Session::Effect::Open || decision.effect == Session::Effect::Switch) {
+            if (!pendingSince.isValid())   // the screen was up to date: the user's wait starts now
+                pendingSince.start();
             loadTimer.start();   // coalesces a batch of calls into one load of the final address
+        }
     }
 
     void startLoad()
@@ -502,8 +515,10 @@ struct Controller::Private {
                   return image::decodeIfCurrent(generation, path, header, px);
               });
         job.then(q, [this, generation](const QImage &image) { onDecoded(generation, image); });
-        if (!applied())
-            graceTimer.start(kGraceMs);
+        if (!applied()) {   // a held arrow restarts nothing: the grace counts from the first unshown switch
+            const qint64 waited = pendingSince.isValid() ? pendingSince.elapsed() : 0;
+            graceTimer.start(int(std::max<qint64>(0, kGraceMs - waited)));
+        }
     }
 
     void onGrace()   // the decode is late: show the placeholder now, the image replaces it when it lands
@@ -580,11 +595,13 @@ struct Controller::Private {
 
     void onMediaLoaded(quint64 generation, bool ok, bool hasVideo, QSize size)
     {
-        if (!current(generation) || cur.kind != Kind::Video)
+        if (!current(generation) || (cur.kind != Kind::Video && cur.kind != Kind::Audio))
             return;
         budgetTimer.stop();
         if (!ok)
-            return showError(CardReason::CannotOpen);
+            return showError(CardReason::CannotOpen);   // InvalidMedia, video or audio (spec "Ошибки и пределы")
+        if (cur.kind == Kind::Audio)
+            return;   // the card is up and the player active already
         if (hasVideo) {
             videoSize = size;
             const bool active = applied();   // the 16:9 fallback activated it already

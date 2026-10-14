@@ -25,6 +25,8 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUrl>
+#include <fcntl.h>
+#include <unistd.h>
 
 // Offscreen, software Quick, no D-Bus (a disconnected connection: calls go through handleShowFile/handleClose),
 // no media. XDG dirs come from ql_test() (build/test-home): main() refuses to run otherwise.
@@ -38,6 +40,24 @@ void dropSizeHintNoise(QtMsgType type, const QMessageLogContext &context, const 
 {
     if (message != QLatin1String("This plugin does not support propagateSizeHints()"))
         g_testLog(type, context, message);
+}
+struct StderrMute {   // FFmpeg's av_log reports a garbage file straight to stderr
+    int saved = dup(2);
+    StderrMute() { if (const int n = open("/dev/null", O_WRONLY); n >= 0) { dup2(n, 2); close(n); } }
+    ~StderrMute() { dup2(saved, 2); close(saved); }
+};
+bool writeDetailedPng(const QString &path, QSize size)   // costly to decode: well past the 40 ms grace
+{
+    QImage img(size, QImage::Format_RGB32);
+    QPainter p(&img);
+    QLinearGradient g(0, 0, size.width(), size.height());
+    g.setColorAt(0, Qt::darkBlue);
+    g.setColorAt(1, Qt::yellow);
+    p.fillRect(img.rect(), g);
+    for (int i = 0; i < size.width(); i += 37)
+        p.drawLine(i, 0, size.width() - i, size.height());
+    p.end();
+    return img.save(path, "PNG");
 }
 bool writeFile(const QString &path, const QByteArray &data)
 {
@@ -338,6 +358,85 @@ private Q_SLOTS:
         QTRY_COMPARE(m_window->size(), l.window);
         QTRY_COMPARE(m_controller->contentRect(), l.content);
     }
+    // Switching resizes in the same pass: at shown(B) min == max == B's window and the rect is B's
+    // (shrink both, grow both, and a mixed change through setWindowSize).
+    void switchResizes()
+    {
+        QVERIFY(writePng(file(u"wide.png"_s), QSize(700, 100)));
+        QVERIFY(writePng(file(u"tall.png"_s), QSize(200, 500)));
+        QVERIFY(show(file(u"photo.png"_s)) != 0);
+        const QStringList steps{u"tiny.png"_s, u"photo.png"_s, u"wide.png"_s, u"tall.png"_s};   // shrink, grow, -, mixed
+        QSize previous = m_controller->currentLayout().window;
+        for (const QString &name : steps) {
+            Layout atShown;
+            QSize minAt, maxAt;
+            QRectF rectAt;
+            auto c = connect(m_controller.get(), &Controller::shown, this, [&] {
+                atShown = m_controller->currentLayout();
+                minAt = m_window->minimumSize();
+                maxAt = m_window->maximumSize();
+                rectAt = m_controller->contentRect();
+            });
+            QSignalSpy spy(m_controller.get(), &Controller::shown);
+            request(file(name), false);
+            QVERIFY(spy.wait(2000));
+            disconnect(c);
+            QCOMPARE(m_window->title(), name);
+            QVERIFY(atShown.window != previous);
+            QCOMPARE(minAt, atShown.window);
+            QCOMPARE(maxAt, atShown.window);
+            QCOMPARE(rectAt, atShown.content);
+            QTRY_COMPARE(m_window->size(), atShown.window);
+            previous = atShown.window;
+        }
+    }
+    // A held arrow: the 40 ms grace bounds the user's wait, not each generation's, so slow images still show.
+    void heldArrowShows()
+    {
+        QStringList big;
+        for (int i = 0; i < 3; ++i) {
+            big << file(u"big%1.png"_s.arg(i));
+            QVERIFY(writeDetailedPng(big.last(), QSize(4000, 3000)));
+        }
+        QVERIFY(show(file(u"notes.txt"_s)) != 0);
+        const quint64 start = m_session.generation();
+        QList<quint64> during;
+        auto c = connect(m_controller.get(), &Controller::shown, this, [&](quint64 g) { during << g; });
+        for (int i = 0; i < 15; ++i) {
+            request(big.at(i % big.size()), false);
+            QTest::qWait(30);
+        }
+        disconnect(c);
+        QVERIFY2(during.size() >= 3, qPrintable(QString::number(during.size())));
+        QVERIFY(during.first() > start);
+    }
+    void brokenAudioCard()   // spec "Ошибки и пределы": InvalidMedia -> "Не удалось открыть"
+    {
+        const QString path = file(u"broken.mp3"_s);
+        QVERIFY(writeFile(path, QByteArray(4096, 'z')));
+        StderrMute mute;
+        QVERIFY(show(path) != 0);
+        QCOMPARE(m_controller->kind(), u"audio"_s);
+        QTRY_COMPARE(m_controller->cardReason(), reasonText(CardReason::CannotOpen, uiRussian()));
+        QCOMPARE(m_controller->kind(), u"file"_s);
+        QCOMPARE(m_controller->currentLayout().window, QSize(520, 180));   // the shown window keeps its size
+    }
+    void hintClearedOnSwitchAndClose()
+    {
+        QVERIFY(writeFile(file(u"nobody.qlunknown"_s), QByteArray("\x00\x01", 2)));
+        QVERIFY(show(file(u"nobody.qlunknown"_s)) != 0);
+        QTest::keyClick(m_window, Qt::Key_Return);   // application/octet-stream: no default app
+        QVERIFY(m_session.visible());
+        QCOMPARE(m_controller->hint(), uiText(Str::NoApp));
+        QVERIFY(writeFile(file(u"nobody2.qlunknown"_s), QByteArray("\x00\x02", 2)));
+        QVERIFY(show(file(u"nobody2.qlunknown"_s)) != 0);   // a switch (another uri while shown)
+        QCOMPARE(m_controller->hint(), QString());   // cleared by the switch, long before its 2 s
+        QTRY_COMPARE(m_window->title(), u"nobody2.qlunknown"_s);
+        QTest::keyClick(m_window, Qt::Key_Return);
+        QCOMPARE(m_controller->hint(), uiText(Str::NoApp));
+        m_service->handleClose();
+        QCOMPARE(m_controller->hint(), QString());
+    }
     // Hyprland "maximized" (Super+Alt+F) or tiling resizes the window without a state Qt can see: the content
     // follows the actual size; back at the file's size, the normal content rect returns.
     void compositorSizeRefits()
@@ -365,6 +464,8 @@ int main(int argc, char **argv)
     qputenv("QT_QPA_OFFSCREEN_NO_GLX", "1");   // the offscreen plugin would open GLX on $DISPLAY
     qputenv("QT_QUICK_BACKEND", "software");
     qputenv("GIO_USE_VFS", "local");   // GVfs would connect to the session bus on the first GIO call (task 6)
+    qputenv("PULSE_SERVER", "unix:/nonexistent");   // no audio output is ever created; if one were, it goes nowhere
+    qputenv("PIPEWIRE_REMOTE", "/nonexistent");
     qunsetenv("HYPRLAND_INSTANCE_SIGNATURE");
     for (const char *name : {"XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"}) {
         if (!qgetenv(name).contains("/test-home/")) {

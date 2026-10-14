@@ -36,7 +36,12 @@ int main(int argc, char **argv)
     controller.registerImageProviders(&engine);
     engine.rootContext()->setContextProperty(QStringLiteral("ql"), &controller);
     engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
-    controller.attachWindow(qobject_cast<QQuickWindow *>(engine.rootObjects().value(0)));
+    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().value(0));
+    if (!window) {
+        qCritical("omarchy-quicklook: qrc:/qml/Main.qml did not load");
+        return 1;
+    }
+    controller.attachWindow(window);
     if (!service.registerOnBus()) {
         qCritical("omarchy-quicklook: cannot own org.gnome.NautilusPreviewer (taken?)");
         return 1;

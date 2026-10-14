@@ -238,7 +238,7 @@ private Q_SLOTS:
         tick.stop();
         m_service->handleClose();
         qInfo("burst: 30 images, %lld shown, max GUI gap %lld ms", qint64(shown.count()), maxGap);
-        QVERIFY(shown.count() >= 10);   // about 20: some switches land inside the previous grace
+        QVERIFY(shown.count() >= 25);   // the grace bounds the wait since the first unshown switch: about every one
         QVERIFY2(maxGap <= kMaxGapMs, qPrintable(u"%1 ms"_s.arg(maxGap)));
     }
 };
