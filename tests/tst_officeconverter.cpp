@@ -137,15 +137,14 @@ private Q_SLOTS:
         QDir(OfficeConverter::profileDir()).removeRecursively();
     }
     void init() { freshLog(); }
+    void cleanup() { removeStubPipes(); }   // the stub instance dies by SIGKILL: its fake pipe stays behind
     void cleanupTestCase()
     {
         if (!guarded())   // QtTest runs this even after initTestCase failed
             return;
         OfficeConverter::killOrphans(OfficeConverter::profileDir());
         OfficeConverter::killOrphans(controlProfile());
-        const QString prefix = QStringLiteral("OSL_PIPE_%1_qltest_").arg(::getuid());
-        for (const QString &n : QDir(QStringLiteral("/tmp")).entryList({prefix + "*"}, QDir::System | QDir::Files))
-            QFile::remove("/tmp/" + n);
+        removeStubPipes();
     }
 
     void paths()
@@ -267,6 +266,28 @@ private Q_SLOTS:
             QTRY_VERIFY(!alive(s.toLongLong()));
     }
 
+    // Files re-selects the file being converted (a, b, a): the running job takes the newest generation, the
+    // waiting one is dropped, and no second conversion of the same file starts.
+    void sameFileRetargetsRunningJob()
+    {
+        OfficeCache cache(m_tmp.filePath("cache-r"));
+        auto c = std::make_unique<OfficeConverter>(&cache, m_env);
+        QSignalSpy ok(c.get(), &OfficeConverter::converted), bad(c.get(), &OfficeConverter::failed);
+        c->setProgram(m_stub);
+        const QString a = file("ra.odt"), b = file("rb.odt");
+        c->convert(1, a);
+        c->convert(2, b);
+        c->convert(3, a);
+        QTRY_COMPARE_WITH_TIMEOUT(ok.size(), 1, 5000);
+        QCOMPARE(ok.at(0).at(0).toULongLong(), 3u);
+        QCOMPARE(ok.at(0).at(1).toString(), cache.lookup(a));
+        QTest::qWait(600);   // a second conversion would take 0.3 s
+        QCOMPARE(ok.size(), 1);
+        QCOMPARE(bad.size(), 0);
+        QCOMPARE(pidsOf(m_log, "convert").size(), 1);
+        QVERIFY(cache.lookup(b).isEmpty());
+    }
+
     void timeoutKillsGroupAndRecovers()
     {
         OfficeCache cache(m_tmp.filePath("cache-t"));
@@ -364,6 +385,12 @@ private Q_SLOTS:
 
 private:
     static QString controlProfile() { return OfficeConverter::profileDir() + "-control"; }
+    static void removeStubPipes()
+    {
+        const QString prefix = QStringLiteral("OSL_PIPE_%1_qltest_").arg(::getuid());
+        for (const QString &n : QDir(QStringLiteral("/tmp")).entryList({prefix + "*"}, QDir::System | QDir::Files))
+            QFile::remove("/tmp/" + n);
+    }
 
     // incoming connections, -1 if the setup or the conversion failed
     int fetchesDuringConversion(bool control)

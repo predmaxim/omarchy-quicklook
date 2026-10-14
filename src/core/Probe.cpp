@@ -126,7 +126,7 @@ void detailStage(ProbeResult &r)
             r.layout = geometry::cardLayout(Kind::Audio);
             break;
         case Kind::Video:
-            r.placeholder = loadThumbnail(r.file.canonicalUri, r.file.modified);   // Controller scales it
+            r.placeholder = loadThumbnail(r.file.canonicalUri, r.file.modified);   // as is: VideoView fits it
             break;
         default:
             break;

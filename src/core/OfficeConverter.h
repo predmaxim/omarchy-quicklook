@@ -16,7 +16,8 @@ public:
     ~OfficeConverter() override;   // terminates the warm instance
 
     void convert(quint64 generation, const QString &path);
-        // one job at a time; a waiting job is replaced by a newer one; the running job finishes into the cache
+        // one job at a time; a waiting job is replaced by a newer one; the running job finishes into the cache;
+        // the path of the running job retargets it to this generation and drops the waiting one
     void setProgram(const QString &soffice);          // tests (default "soffice")
     void setTimeouts(int convertMs, int idleMs);      // defaults 30000, 300000
 

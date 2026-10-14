@@ -1,8 +1,10 @@
 #include "Controller.h"
 #include "Geometry.h"
+#include "MediaController.h"
 #include "OfficeCache.h"
 #include "PreviewerService.h"
 #include "Session.h"
+#include "StateStore.h"
 #include "Types.h"
 #include <QAbstractItemModel>
 #include <QCloseEvent>
@@ -15,6 +17,7 @@
 #include <QLoggingCategory>
 #include <QPainter>
 #include <QPdfWriter>
+#include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickItem>
@@ -64,6 +67,12 @@ bool writeFile(const QString &path, const QByteArray &data)
     QFile f(path);
     return f.open(QIODevice::WriteOnly) && f.write(data) == data.size();
 }
+bool ffmpeg(const QStringList &args)
+{
+    QProcess p;
+    p.start(u"ffmpeg"_s, QStringList{u"-v"_s, u"error"_s, u"-y"_s} + args);
+    return p.waitForFinished(30000) && p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
+}
 bool writePng(const QString &path, QSize size)
 {
     QImage img(size, QImage::Format_RGB32);
@@ -88,26 +97,39 @@ class TstController : public QObject {
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QQuickWindow *m_window = nullptr;
     QString m_launchLog;
+    bool m_haveMedia = false;   // ffmpeg made the video/audio/GIF files
 
     QString file(const QString &name) const { return m_dir.filePath(name); }
     void request(const QString &path, bool close = true)
     {
         m_service->handleShowFile(QUrl::fromLocalFile(path).toString(), QString(), close, QString());
     }
-    quint64 show(const QString &path)   // -> the generation shown, 0 on timeout
+    quint64 show(const QString &path, bool closeIfShown = true)   // -> the generation shown, 0 on timeout
     {
         QSignalSpy spy(m_controller.get(), &Controller::shown);
-        request(path);
+        request(path, closeIfShown);
         if (!spy.wait(2000))
             return 0;
         return spy.first().first().toULongLong();
     }
+    QObject *media() const { return m_controller->mediaObject(); }
 
 private Q_SLOTS:
     void initTestCase()
     {
         g_testLog = qInstallMessageHandler(dropSizeHintNoise);   // QTest's handler is installed by now
         QVERIFY(m_dir.isValid());
+        StateStore().setMuted(true);   // media tests: video never gets an audio output, audio plays into a muted one
+        // Office cache miss: a fake soffice on PATH (read when the converter spawns, launch env taken below). The
+        // warm instance exits at once, so the converter runs the conversion standalone; it copies real.pdf.
+        const QString bin = file(u"bin"_s);
+        QVERIFY(QDir().mkpath(bin));
+        QVERIFY(writeFile(bin + u"/soffice"_s,
+                          ("#!/bin/bash\n[[ \" $* \" == *\" --convert-to \"* ]] || exit 0\n"
+                           "for a in \"$@\"; do [[ $prev == --outdir ]] && out=$a; prev=$a; f=$a; done\n"
+                           "b=${f##*/}\ncp '" + file(u"real.pdf"_s) + "' \"$out/${b%.*}.pdf\"\n").toUtf8()));
+        QFile(bin + u"/soffice"_s).setPermissions(QFile::ReadOwner | QFile::ExeOwner);
+        qputenv("PATH", (bin + u':').toLocal8Bit() + qgetenv("PATH"));
         // Enter: a stub replaces uwsm-app and logs its arguments; a default app for image/png in the test XDG dirs
         const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
         const QString config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
@@ -137,6 +159,23 @@ private Q_SLOTS:
         QVERIFY(writePng(file(u"tiny.png"_s), QSize(64, 64)));
         QVERIFY(writeFile(file(u"notes.txt"_s), "alpha\nbeta\ngamma\n"));
         QVERIFY(writeFile(file(u"other.txt"_s), "one\ntwo\n"));
+        {
+            QPdfWriter writer(file(u"real.pdf"_s));
+            writer.setPageSize(QPageSize(QPageSize::A5));
+            writer.setPageOrientation(QPageLayout::Landscape);
+            QPainter painter(&writer);
+            painter.drawText(QPointF(100, 100), u"converted"_s);
+        }
+        m_haveMedia = !QStandardPaths::findExecutable(u"ffmpeg"_s).isEmpty();
+        if (m_haveMedia) {
+            const QString lavfi = u"lavfi"_s;
+            QVERIFY(ffmpeg({u"-f"_s, lavfi, u"-i"_s, u"testsrc=size=320x240:rate=25:duration=1"_s, u"-pix_fmt"_s,
+                            u"yuv420p"_s, file(u"a.mp4"_s)}));
+            QVERIFY(ffmpeg({u"-f"_s, lavfi, u"-i"_s, u"testsrc=size=640x360:rate=25:duration=1"_s, u"-pix_fmt"_s,
+                            u"yuv420p"_s, file(u"b.mp4"_s)}));
+            QVERIFY(ffmpeg({u"-f"_s, lavfi, u"-i"_s, u"sine=duration=1"_s, u"-c:a"_s, u"libmp3lame"_s, file(u"tone.mp3"_s)}));
+            QVERIFY(ffmpeg({u"-f"_s, lavfi, u"-i"_s, u"testsrc=size=300x200:rate=10:duration=1"_s, file(u"anim.gif"_s)}));
+        }
     }
     void cleanupTestCase()
     {
@@ -436,6 +475,122 @@ private Q_SLOTS:
         QCOMPARE(m_controller->hint(), uiText(Str::NoApp));
         m_service->handleClose();
         QCOMPARE(m_controller->hint(), QString());
+    }
+    void video()   // the window takes the video's size; a switch resizes; leaving video releases the player
+    {
+        if (!m_haveMedia)
+            QSKIP("ffmpeg missing");
+        QVERIFY(show(file(u"a.mp4"_s)) != 0);
+        QCOMPARE(m_controller->kind(), u"video"_s);
+        QCOMPARE(m_controller->currentLayout().window, QSize(320, 240));
+        QTRY_VERIFY(media()->property("hasFrame").toBool());
+        QVERIFY(show(file(u"b.mp4"_s), false) != 0);
+        QCOMPARE(m_controller->currentLayout().window, QSize(640, 360));
+        QTRY_VERIFY(media()->property("hasFrame").toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(media()->property("playing").toBool(), 2000);
+        QVERIFY(show(file(u"photo.png"_s), false) != 0);
+        QCOMPARE(m_controller->kind(), u"image"_s);
+        QVERIFY(!media()->property("playing").toBool());
+        QVERIFY(!media()->property("hasFrame").toBool());
+    }
+    // LoadedMedia with a video track but no size yet: the 16:9 fallback, not a 240 px square.
+    void videoWithoutSize()
+    {
+        if (!m_haveMedia)
+            QSKIP("ffmpeg missing");
+        struct FakeLoad : QObject {   // queued ahead of the real LoadedMedia, which arrives from FFmpeg later
+            MediaController *media = nullptr;
+            Session *session = nullptr;
+            bool eventFilter(QObject *, QEvent *event) override
+            {
+                if (event->type() == QEvent::ChildAdded) {   // the new QMediaPlayer (not cast-able yet: in its ctor)
+                    QMetaObject::invokeMethod(media, [m = media, g = session->generation()] {
+                        Q_EMIT m->loaded(g, true, true, QSize());
+                    }, Qt::QueuedConnection);
+                    media->removeEventFilter(this);
+                }
+                return false;
+            }
+        } fake;
+        fake.media = qobject_cast<MediaController *>(media());
+        fake.session = &m_session;
+        QVERIFY(fake.media);
+        fake.media->installEventFilter(&fake);
+        QVERIFY(show(file(u"a.mp4"_s)) != 0);
+        fake.media->removeEventFilter(&fake);
+        const QSize w = m_controller->currentLayout().window;
+        QVERIFY2(qAbs(double(w.width()) / w.height() - 16.0 / 9.0) < 0.02, qPrintable(u"%1x%2"_s.arg(w.width()).arg(w.height())));
+    }
+    void audio()
+    {
+        if (!m_haveMedia)
+            QSKIP("ffmpeg missing");
+        QVERIFY(show(file(u"tone.mp3"_s)) != 0);
+        QCOMPARE(m_controller->kind(), u"audio"_s);
+        QCOMPARE(m_controller->currentLayout().window, QSize(520, 180));
+        QCOMPARE(m_controller->cardRect(), QRectF(0, 0, 520, 180));
+        QCOMPARE(m_controller->audioTitle(), u"tone.mp3"_s);
+        QTRY_VERIFY(media()->property("duration").toLongLong() > 0);
+    }
+    // M is the media mute: on an image or text it must not flip the remembered state.
+    void muteKeyOnlyForMedia()
+    {
+        StateStore state;
+        state.setMuted(true);
+        QVERIFY(show(file(u"photo.png"_s)) != 0);
+        QTest::keyClick(m_window, Qt::Key_M);
+        QVERIFY(state.muted());
+        QVERIFY(show(file(u"notes.txt"_s), false) != 0);
+        QTest::keyClick(m_window, Qt::Key_M);
+        QVERIFY(state.muted());
+        state.setMuted(true);
+    }
+    // Cache miss: the busy page first, then the converted PDF in the same window.
+    void officeMiss()
+    {
+        const QString doc = file(u"miss.rtf"_s);
+        QVERIFY(writeFile(doc, "{\\rtf1 hello}"));
+        QVERIFY(show(doc) != 0);
+        QCOMPARE(m_controller->kind(), u"office"_s);
+        QVERIFY(m_controller->busy());
+        const QSize w = m_controller->currentLayout().window;
+        QTRY_VERIFY_WITH_TIMEOUT(!m_controller->busy(), 10000);
+        QCOMPARE(m_controller->kind(), u"pdf"_s);
+        QCOMPARE(m_controller->cardReason(), QString());
+        QCOMPARE(m_controller->currentLayout().window, w);
+        auto *list = m_window->findChild<QQuickItem *>(u"pdfList"_s);
+        QTRY_VERIFY(itemAt(list, 0));
+        auto *page = itemAt(list, 0)->findChild<QQuickItem *>(u"pageImage"_s);
+        QVERIFY(page);
+        QTRY_COMPARE(page->property("status").toInt(), 1);
+    }
+    void fullScreenThenEscReopensNormal()
+    {
+        QVERIFY(show(file(u"photo.png"_s)) != 0);
+        const Layout l = m_controller->currentLayout();
+        QTest::keyClick(m_window, Qt::Key_F);
+        QTRY_VERIFY(m_controller->fullScreen());
+        QTest::keyClick(m_window, Qt::Key_Escape);
+        QVERIFY(!m_session.visible());
+        QVERIFY(!m_window->isVisible());
+        QVERIFY(!m_controller->fullScreen());
+        QVERIFY(show(file(u"photo.png"_s)) != 0);
+        QVERIFY(!(m_window->windowStates() & Qt::WindowFullScreen));
+        QTRY_COMPARE(m_window->size(), l.window);
+        QCOMPARE(m_controller->contentRect(), l.content);
+    }
+    void animatedThenSwitch()   // the animation stops on a switch: the next image is not overwritten by frames
+    {
+        if (!m_haveMedia)
+            QSKIP("ffmpeg missing");
+        QVERIFY(show(file(u"anim.gif"_s)) != 0);
+        QCOMPARE(m_controller->kind(), u"image"_s);
+        QSignalSpy frames(m_controller.get(), &Controller::imageChanged);
+        QTRY_VERIFY(frames.count() >= 3);
+        QVERIFY(show(file(u"photo.png"_s), false) != 0);
+        QTRY_VERIFY(!m_controller->imageSource().isEmpty());
+        QTest::qWait(300);   // a GIF frame every 100 ms
+        QVERIFY2(!m_controller->imageSource().contains(u"/frame/"_s), qPrintable(m_controller->imageSource()));
     }
     // Hyprland "maximized" (Super+Alt+F) or tiling resizes the window without a state Qt can see: the content
     // follows the actual size; back at the file's size, the normal content rect returns.

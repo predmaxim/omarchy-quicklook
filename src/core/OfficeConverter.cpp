@@ -110,6 +110,7 @@ struct OfficeConverter::Private {
     QProcess *dying = nullptr;   // idle-stopped instance during its SIGTERM grace
     std::optional<Job> current;
     std::optional<Job> pending;
+    int jobSerial = 0;   // per started job: deferred calls of an ended job do nothing (current->gen may be retargeted)
     QProcess *proc = nullptr;
     std::shared_ptr<QTemporaryDir> jobDir;
 
@@ -131,11 +132,12 @@ struct OfficeConverter::Private {
     void startJob(const Job &job)
     {
         current = job;
+        const int serial = ++jobSerial;
         idleTimer.stop();
         convertTimer.start(convertMs);   // covers the instance start too
         if (instance && instance->state() != QProcess::NotRunning) {
-            QTimer::singleShot(0, q, [this, gen = job.gen] {   // signals never fire inside convert()
-                if (current && current->gen == gen && !proc)
+            QTimer::singleShot(0, q, [this, serial] {   // signals never fire inside convert()
+                if (current && jobSerial == serial && !proc)
                     runConversion();
             });
             return;
@@ -143,8 +145,8 @@ struct OfficeConverter::Private {
         reapDying();
         killAndDelete(instance);   // exited on its own
         if (!ensureProfileSecurity(profileDir())) {
-            QTimer::singleShot(0, q, [this, gen = job.gen] {
-                if (current && current->gen == gen && !proc)
+            QTimer::singleShot(0, q, [this, serial] {
+                if (current && jobSerial == serial && !proc)
                     endJob(false);
             });
             return;
@@ -281,10 +283,14 @@ OfficeConverter::~OfficeConverter()
 
 void OfficeConverter::convert(quint64 generation, const QString &path)
 {
-    if (d->current)
+    if (d->current && d->current->path == path) {   // Files came back to the file being converted
+        d->current->gen = generation;
+        d->pending.reset();
+    } else if (d->current) {
         d->pending = Private::Job{generation, path};
-    else
+    } else {
         d->startJob({generation, path});
+    }
 }
 
 void OfficeConverter::setProgram(const QString &soffice)

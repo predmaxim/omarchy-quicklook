@@ -22,7 +22,7 @@ class Controller : public QObject {
     Q_PROPERTY(QString imageSource READ imageSource NOTIFY imageChanged)    // decoded image or animation frame
     Q_PROPERTY(QString placeholderSource READ placeholderSource NOTIFY contentChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY contentChanged)                   // office conversion running
-    Q_PROPERTY(double scale READ scale NOTIFY contentChanged)               // monitor scale (1.25): QML sourceSize = rect * scale
+    Q_PROPERTY(double scale READ scale NOTIFY contentChanged)               // monitor scale (1.25); C++ decodes at rect * scale, QML sourceSize stays logical (Qt applies the DPR)
     Q_PROPERTY(QString cardName READ cardName NOTIFY contentChanged)        // up to 2 lines joined by '\n' (2nd elided in the middle)
     Q_PROPERTY(QString cardType READ cardType NOTIFY contentChanged)
     Q_PROPERTY(QString cardDetails READ cardDetails NOTIFY contentChanged) // "1,2 MB · 14.10.2026" or items

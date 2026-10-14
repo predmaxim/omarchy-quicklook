@@ -55,7 +55,7 @@ Item {
                 width: page.pageWidth
                 height: page.height
                 source: page.source
-                sourceSize.width: Math.round(page.pageWidth * ql.scale)
+                sourceSize.width: Math.round(page.pageWidth)   // logical: Qt multiplies by the window DPR itself
                 asynchronous: true
                 retainWhileLoading: true
                 cache: false

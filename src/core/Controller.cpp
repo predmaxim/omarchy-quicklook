@@ -605,7 +605,7 @@ struct Controller::Private {
         if (hasVideo) {
             videoSize = size;
             const bool active = applied();   // the 16:9 fallback activated it already
-            apply(cur, geometry::videoLayout(size, cur.monitor),
+            apply(cur, size.isEmpty() ? fallbackFor(cur) : geometry::videoLayout(size, cur.monitor),
                   {.placeholder = active ? placeholderSource : put("placeholder", cur.placeholder)});
             if (!active)
                 media.activate(generation, false);   // again would re-arm autoplay and undo a K pause
@@ -703,7 +703,8 @@ struct Controller::Private {
             media.seekBy(kSeekMs);
             break;
         case KeyAction::Mute:
-            media.toggleMute();
+            if (kind == Kind::Video || kind == Kind::Audio)   // the remembered mute is about media only
+                media.toggleMute();
             break;
         case KeyAction::None:
             break;
