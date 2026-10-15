@@ -601,6 +601,17 @@ struct Controller::Private {
             decodeForZoom();
     }
 
+    void refitZoom()   // the window changed: the same level within the new fit's range (text: the same font)
+    {
+        const double from = zoom;
+        zoom = geometry::zoomAt(zoomLevel, zoomRange());
+        if (zoom == from)
+            return;
+        Q_EMIT q->zoomChanged();
+        if (zoom > 1)
+            decodeForZoom();
+    }
+
     void resetZoom()
     {
         zoomLevel = 0;
@@ -764,6 +775,8 @@ struct Controller::Private {
         updateRects();
         if (content != contentRect || card != cardRect)
             Q_EMIT q->contentChanged();
+        if (content != contentRect)
+            refitZoom();
         redecodeIfLarger();
     }
 
@@ -773,13 +786,13 @@ struct Controller::Private {
         if (full == fullScreen || (full && !window->isVisible()))
             return;
         fullScreen = full;
-        resetZoom();   // the fit changes with the window
         if (!full) {   // back to the current file's own size, also after a switch made in full screen
             setWindowSize(layout.window);
             window->resize(layout.window);
         }
         updateRects();
         Q_EMIT q->contentChanged();
+        refitZoom();   // the size may come later: onResized refits again
         Q_EMIT q->fullScreenChanged();
         redecodeIfLarger();
     }

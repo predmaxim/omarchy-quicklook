@@ -669,6 +669,29 @@ private Q_SLOTS:
         QVERIFY(show(file(u"notes.txt"_s), false) != 0);
         QCOMPARE(m_controller->zoom(), 1.0);
     }
+    void zoomSurvivesFullScreen()   // F and back keep the zoom: text the font, an image its level of the fit
+    {
+        QVERIFY(show(file(u"notes.txt"_s)) != 0);
+        QTest::keyClick(m_window, Qt::Key_Equal, Qt::ControlModifier);
+        QCOMPARE(m_controller->zoom(), 1.25);
+        QTest::keyClick(m_window, Qt::Key_F);
+        QTRY_VERIFY(m_controller->fullScreen());
+        QCOMPARE(m_controller->zoom(), 1.25);
+        QTest::keyClick(m_window, Qt::Key_F);
+        QTRY_VERIFY(!m_controller->fullScreen());
+        QCOMPARE(m_controller->zoom(), 1.25);
+
+        QVERIFY(writePng(file(u"big.png"_s), QSize(3000, 2000)));
+        QVERIFY(show(file(u"big.png"_s), false) != 0);
+        QTest::keyClick(m_window, Qt::Key_Equal, Qt::ControlModifier);
+        QCOMPARE(m_controller->zoom(), 1.25);
+        QTest::keyClick(m_window, Qt::Key_F);
+        QTRY_VERIFY(m_controller->fullScreen());
+        QTRY_COMPARE(m_controller->zoom(), 1.25);
+        QTest::keyClick(m_window, Qt::Key_F);
+        QTRY_VERIFY(!m_controller->fullScreen());
+        QTRY_COMPARE(m_controller->zoom(), 1.25);
+    }
     void zoomText()   // the font grows and shrinks (10..48 px), rows keep the window's width
     {
         QVERIFY(show(file(u"notes.txt"_s)) != 0);
