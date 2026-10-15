@@ -183,6 +183,8 @@ struct Controller::Private {
     FileInfo shownFile;         // Enter, Del, card name
     int zoomLevel = 0;          // zoom = 1.25^zoomLevel within the kind's range
     double zoom = 1;
+    QString markdownText;       // the shown Markdown file as HTML (truncation note appended), else ""
+    bool markdownSource = false;   // V: raw text instead of rendered, kept across files
     QString trashTarget;        // Del: waits for Files to show another file
     bool trashTriedLeft = false;
 
@@ -320,8 +322,10 @@ struct Controller::Private {
         animator.stop();
         if (r.kind != Kind::Video && r.kind != Kind::Audio)
             media.release();
-        if (r.kind != Kind::Text)
+        if (r.kind != Kind::Text) {
             textModel.clear();
+            markdownText.clear();
+        }
         if (r.kind != Kind::Pdf)
             pdfModel.clear();
 
@@ -354,6 +358,7 @@ struct Controller::Private {
         store->dropOlderThan(generation);
         Q_EMIT q->contentChanged();
         Q_EMIT q->imageChanged();
+        Q_EMIT q->markdownChanged();
         if (fill)
             fill();   // models after the size: rows are laid out at the final width
         if (!again)
@@ -494,6 +499,9 @@ struct Controller::Private {
             const QString footer = cur.text.truncated
                 ? truncatedHint(cur.text.shownBytes, cur.text.totalBytes, uiRussian()) : QString();
             const QStringList rows = std::move(d.rows);
+            markdownText.clear();
+            if (cur.file.mimeName == u"text/markdown" && cur.text.text.size() <= text::kMaxMarkdownChars)
+                markdownText = text::markdownHtml(footer.isEmpty() ? cur.text.text : cur.text.text + u"\n\n*" + footer + u'*');
             apply(cur, cur.layout, {}, [&] { textModel.setContent(rows, definition, footer); });
             return;
         }
@@ -838,6 +846,12 @@ struct Controller::Private {
                 Q_EMIT q->panRequested(action == KeyAction::PanLeft ? -1 : action == KeyAction::PanRight ? 1 : 0,
                                        action == KeyAction::PanUp ? -1 : action == KeyAction::PanDown ? 1 : 0);
             break;
+        case KeyAction::ToggleView:
+            if (!markdownText.isEmpty()) {
+                markdownSource = !markdownSource;
+                Q_EMIT q->markdownChanged();
+            }
+            break;
         case KeyAction::None:
             break;
         }
@@ -940,6 +954,7 @@ QObject *Controller::themeObject() const { return &d->theme; }
 bool Controller::fullScreen() const { return d->fullScreen; }
 QString Controller::hint() const { return d->hint; }
 double Controller::zoom() const { return d->zoom; }
+QString Controller::markdown() const { return d->markdownSource ? QString() : d->markdownText; }
 
 void Controller::setVideoSink(QObject *videoSink) { d->media.setOutputSink(qobject_cast<QVideoSink *>(videoSink)); }
 

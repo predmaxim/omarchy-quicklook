@@ -9,8 +9,8 @@ Item {
         objectName: "textList"
         anchors.fill: parent
         model: ql.text
-        topMargin: 16
-        bottomMargin: 16
+        topMargin: 48      // geometry::kTextPadding
+        bottomMargin: 48
         reuseItems: true
         cacheBuffer: 0   // no asynchronous buffer incubation: a reset during it makes DelegateModel warn
         clip: true
@@ -20,13 +20,16 @@ Item {
         delegate: Text {
             required property string rowText
             required property bool dim
-            x: 16
-            width: ListView.view.width - 32
+            // Padding, not x: ListView resets the delegate's x to 0.
+            leftPadding: 48
+            rightPadding: 48
+            width: ListView.view.width
             text: rowText
             textFormat: Text.StyledText
             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
             font.family: "monospace"
             font.pixelSize: Math.round(16 * ql.zoom)
+            lineHeight: 1.7   // text::kLineHeight
             color: dim ? ql.theme.muted : ql.theme.foreground
         }
     }
@@ -36,7 +39,7 @@ Item {
         target: ql
         enabled: view.visible
         function onZoomStepped(from) {
-            const top = list.indexAt(20, list.contentY + 1)
+            const top = list.indexAt(52, list.contentY + 1)
             if (top >= 0)
                 Qt.callLater(function() { list.positionViewAtIndex(top, ListView.Beginning) })
         }

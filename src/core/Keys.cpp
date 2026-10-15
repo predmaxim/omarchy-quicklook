@@ -47,6 +47,7 @@ KeyAction mapKey(int key, quint32 nativeScanCode, Qt::KeyboardModifiers modifier
         case 44: key = Qt::Key_J; break;
         case 46: key = Qt::Key_L; break;
         case 58: key = Qt::Key_M; break;
+        case 55: key = Qt::Key_V; break;
         default: return KeyAction::None;
         }
     }
@@ -57,6 +58,7 @@ KeyAction mapKey(int key, quint32 nativeScanCode, Qt::KeyboardModifiers modifier
     case Qt::Key_J: return KeyAction::SeekBack;
     case Qt::Key_L: return KeyAction::SeekForward;
     case Qt::Key_M: return KeyAction::Mute;
+    case Qt::Key_V: return KeyAction::ToggleView;
     default: return KeyAction::None;
     }
 }
@@ -84,7 +86,8 @@ bool KeyRouter::eventFilter(QObject *watched, QEvent *event)
     const KeyAction a = mapKey(e->key(), e->nativeScanCode(), e->modifiers());
     if (a == KeyAction::None) return false;
     const bool oneShot = a == KeyAction::Close || a == KeyAction::Open || a == KeyAction::FullScreen
-        || a == KeyAction::PlayPause || a == KeyAction::Mute || a == KeyAction::Trash || a == KeyAction::ZoomFit;
+        || a == KeyAction::PlayPause || a == KeyAction::Mute || a == KeyAction::Trash || a == KeyAction::ZoomFit
+        || a == KeyAction::ToggleView;
     if (e->isAutoRepeat() && oneShot) return true;
     Q_EMIT action(a);
     return true;

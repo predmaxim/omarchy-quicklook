@@ -5,6 +5,7 @@
 #include "PreviewerService.h"
 #include "Session.h"
 #include "StateStore.h"
+#include "TextRows.h"
 #include "Types.h"
 #include <QAbstractItemModel>
 #include <QCloseEvent>
@@ -159,6 +160,7 @@ private Q_SLOTS:
         QVERIFY(writePng(file(u"photo.png"_s), QSize(800, 600)));
         QVERIFY(writePng(file(u"tiny.png"_s), QSize(64, 64)));
         QVERIFY(writeFile(file(u"notes.txt"_s), "alpha\nbeta\ngamma\n"));
+        QVERIFY(writeFile(file(u"readme.md"_s), "# Title\n\n*text*\n"));
         QVERIFY(writeFile(file(u"other.txt"_s), "one\ntwo\n"));
         {
             QPdfWriter writer(file(u"real.pdf"_s));
@@ -232,7 +234,22 @@ private Q_SLOTS:
         auto *list = m_window->findChild<QQuickItem *>(u"textList"_s);
         QTRY_VERIFY(itemAt(list, 0));
         QTRY_VERIFY(itemAt(list, 0)->property("text").toString().contains(u"alpha"_s));   // the row, not its index
-        QCOMPARE(itemAt(list, 0)->property("width").toReal(), list->width() - 32);
+        QCOMPARE(itemAt(list, 0)->property("width").toReal(), list->width());
+        QCOMPARE(itemAt(list, 0)->property("leftPadding").toReal(), 48.0);   // inset text, ListView zeroes x
+        QVERIFY(qAbs(itemAt(list, 0)->height() - text::rowHeight(text::monospaceFont())) < 1);   // the window size's row
+    }
+    void markdown()   // rendered by default, V flips to the raw rows and back; other files: never rendered
+    {
+        QVERIFY(show(file(u"readme.md"_s)) != 0);
+        QVERIFY(m_controller->markdown().contains(u"Title</span></h1>"_s));
+        QTRY_VERIFY(m_window->findChild<QQuickItem *>(u"markdownView"_s)->isVisible());
+        QTest::keyClick(m_window, Qt::Key_V);
+        QVERIFY(m_controller->markdown().isEmpty());
+        QTRY_VERIFY(m_window->findChild<QQuickItem *>(u"textList"_s)->isVisible());
+        QTest::keyClick(m_window, Qt::Key_V);
+        QVERIFY(!m_controller->markdown().isEmpty());
+        QVERIFY(show(file(u"notes.txt"_s)) != 0);
+        QVERIFY(m_controller->markdown().isEmpty());
     }
     void pdf()
     {
@@ -668,7 +685,8 @@ private Q_SLOTS:
         for (int i = 0; i < 10; ++i)
             QTest::keyClick(m_window, Qt::Key_Minus, Qt::ControlModifier);
         QTRY_COMPARE(px(), 10);
-        QCOMPARE(itemAt(list, 0)->property("width").toReal(), list->width() - 32);
+        QCOMPARE(itemAt(list, 0)->property("width").toReal(), list->width());
+        QCOMPARE(itemAt(list, 0)->property("leftPadding").toReal(), 48.0);   // inset text, ListView zeroes x
     }
     void zoomPdf()   // pages grow past the window: horizontal panning, the window keeps its size
     {

@@ -9,7 +9,7 @@ inline constexpr int kMinSide = 240;
 inline constexpr double kBoxFraction = 0.9;
 inline constexpr QSize kFileCard{440, 180};
 inline constexpr QSize kAudioCard{520, 180};
-inline constexpr int kTextPadding = 16;
+inline constexpr int kTextPadding = 48;   // = the margins in TextView.qml and MarkdownView.qml
 inline constexpr int kMinColumns = 40;
 inline constexpr int kMaxColumns = 120;
 

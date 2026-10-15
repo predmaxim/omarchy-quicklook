@@ -11,7 +11,8 @@ Window {
 
     ImageView { anchors.fill: parent; visible: ql.kind === "image" || ql.kind === "svg" }
     PdfView { anchors.fill: parent; visible: ql.kind === "pdf" || ql.kind === "office" }
-    TextView { anchors.fill: parent; visible: ql.kind === "text" }
+    TextView { anchors.fill: parent; visible: ql.kind === "text" && ql.markdown === "" }
+    MarkdownView { anchors.fill: parent; visible: ql.kind === "text" && ql.markdown !== "" }
     VideoView { anchors.fill: parent; visible: ql.kind === "video" }
     AudioCard { visible: ql.kind === "audio" }
     FileCard { visible: ql.kind === "file" || ql.kind === "folder" || ql.cardReason !== "" }

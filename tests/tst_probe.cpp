@@ -212,7 +212,7 @@ private Q_SLOTS:
             many += "line\n";
         put(h, many);
         const ProbeResult t = runProbe(req(h));
-        const int boxH = geometry::box(t.monitor).height();   // rows are capped so that rows*rowHeight + 32 fits
+        const int boxH = geometry::box(t.monitor).height();   // rows are capped so that rows*rowHeight + 2*kTextPadding fits
         QVERIFY(t.layout.window.height() <= boxH && t.layout.window.height() > boxH - t.textMeasure.rowHeight);
     }
     void office()

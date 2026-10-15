@@ -43,9 +43,9 @@ Rectangle {
             else if (action === 8)
                 f.contentY = Math.min(bottom, f.contentY + f.height)
             else if (action === 9)
-                f.positionViewAtBeginning()
-            else if (action === 10)
-                f.positionViewAtEnd()
+                f.positionViewAtBeginning ? f.positionViewAtBeginning() : f.contentY = top
+            else if (action === 10)   // ListView: its contentHeight is an estimate
+                f.positionViewAtEnd ? f.positionViewAtEnd() : f.contentY = bottom
         }
         function onPanRequested(dx, dy) {   // a tenth of the view, within the content
             const f = bar.flickable

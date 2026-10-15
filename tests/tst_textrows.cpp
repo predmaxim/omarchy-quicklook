@@ -6,6 +6,7 @@
 #include "TextRows.h"
 
 using namespace ql::text;
+using namespace Qt::StringLiterals;
 
 class TstTextRows : public QObject
 {
@@ -64,12 +65,22 @@ private Q_SLOTS:
         QVERIFY(!hasLongLine(QString(2000, 'x')));
         QVERIFY(!hasLongLine(QString(kMeasureChars + 10, '\n') + QString(3000, 'x')));
     }
+    void markdownHtml()
+    {
+        const QString html = ql::text::markdownHtml(u"# H\n\n[![badge](https://x/b.svg)](https://x) p\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"_s);
+        QVERIFY(html.contains(u"<body>"_s));                         // QML font and zoom apply
+        QVERIFY(!html.contains(u"<img"_s));                          // nothing to download
+        QVERIFY(html.contains(u">badge p</p>"_s));                   // alt text instead
+        QVERIFY(html.contains(u"cellpadding=\"%1\""_s.arg(kCellPadding)));
+        QVERIFY(html.contains(u"line-height:%1%;"_s.arg(kLineHeight * 100)));
+        QVERIFY(html.contains(u"line-height:100%;"_s));             // table cells
+    }
     void measureShort()
     {
         const auto m = measure("a\nb\nc", monospaceFont(), 1000);
         QCOMPARE(m.columns, ql::geometry::kMinColumns);
         QCOMPARE(m.rows, 3);
-        QCOMPARE(m.rowHeight, int(std::ceil(QFontMetricsF(monospaceFont()).lineSpacing())));
+        QCOMPARE(m.rowHeight, int(std::ceil(std::ceil(QFontMetricsF(monospaceFont()).lineSpacing()) * kLineHeight)));
     }
     void measureWide()
     {

@@ -49,6 +49,8 @@ private Q_SLOTS:
         row("ru J (O)", u'О', 44, none, KeyAction::SeekBack);
         row("ru L (D)", u'Д', 46, none, KeyAction::SeekForward);
         row("ru M (soft)", u'Ь', 58, none, KeyAction::Mute);
+        row("V", Qt::Key_V, 55, none, KeyAction::ToggleView);
+        row("ru V (em)", u'М', 55, none, KeyAction::ToggleView);
         row("ru other scan", u'Ы', 28, none, KeyAction::None);
         row("punctuation not by scan", Qt::Key_Apostrophe, 24, none, KeyAction::None);
         row("delete", Qt::Key_Delete, 119, none, KeyAction::Trash);

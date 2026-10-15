@@ -72,12 +72,12 @@ private Q_SLOTS:
     void textSizes()
     {
         QCOMPARE(textViewportWidth(120, 9.59375), 1153);
-        QCOMPARE(textWindowWidth(120, 9.59375), 1185);
-        QCOMPARE(textLayout(120, 48, 9.59375, 22, laptop).window, QSize(1185, 1088));
+        QCOMPARE(textWindowWidth(120, 9.59375), 1249);
+        QCOMPARE(textLayout(120, 48, 9.59375, 22, laptop).window, QSize(1249, 1111));   // height capped by the box
         QCOMPARE(textLayout(120, 2, 9.59375, 22, laptop).window.height(), 240);
-        QCOMPARE(textLayout(40, 48, 9.59375, 22, laptop).window.width(), 417);
+        QCOMPARE(textLayout(40, 48, 9.59375, 22, laptop).window.width(), 481);
         const auto l = textLayout(120, 48, 9.59375, 22, laptop);
-        VERIFY_RECT(l.content, 0, 0, 1185, 1088);
+        VERIFY_RECT(l.content, 0, 0, 1249, 1111);
     }
     void tinyMonitorClampsMinToBox()
     {

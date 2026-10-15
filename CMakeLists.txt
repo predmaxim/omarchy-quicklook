@@ -90,7 +90,7 @@ target_sources(qlcore PRIVATE src/core/Probe.h src/core/Probe.cpp)
 ql_test(tst_probe)
 target_sources(qlcore PRIVATE src/core/Controller.h src/core/Controller.cpp)
 qt_add_resources(qlcore "qml" PREFIX "/" FILES
-    qml/Main.qml qml/ImageView.qml qml/PdfView.qml qml/TextView.qml qml/VideoView.qml
+    qml/Main.qml qml/ImageView.qml qml/PdfView.qml qml/TextView.qml qml/MarkdownView.qml qml/VideoView.qml
     qml/AudioCard.qml qml/FileCard.qml qml/ScrollIndicator.qml)
 ql_test(tst_controller)
 ql_test(tst_perf perf)

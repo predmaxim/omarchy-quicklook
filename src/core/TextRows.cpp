@@ -1,8 +1,13 @@
 #include "TextRows.h"
 #include "Geometry.h"
 #include <QFontMetricsF>
+#include <QRegularExpression>
+#include <QTextBlock>
+#include <QTextCursor>
+#include <QTextDocument>
 #include <QTextLayout>
 #include <QTextOption>
+#include <QTextTable>
 #include <algorithm>
 #include <cmath>
 
@@ -165,6 +170,54 @@ QFont monospaceFont()
     return f;
 }
 
+QString markdownHtml(const QString &markdown)
+{
+    QTextDocument doc;   // no layout is ever requested: edits cost no relayout
+    doc.setMarkdown(markdown);
+    QTextCursor edit(&doc);
+    edit.beginEditBlock();
+    struct Image { int position; int length; QString alt; QTextCharFormat format; };
+    QList<Image> images;
+    for (QTextBlock b = doc.begin(); b.isValid(); b = b.next()) {
+        QTextCursor c(b);
+        QTextBlockFormat f = b.blockFormat();
+        if (QTextTable *t = c.currentTable()) {
+            f.setLineHeight(100, QTextBlockFormat::ProportionalHeight);
+            QTextTableFormat tf = t->format();
+            if (tf.cellPadding() != kCellPadding) {
+                tf.setCellPadding(kCellPadding);
+                t->setFormat(tf);
+            }
+        } else {
+            f.setLineHeight(kLineHeight * 100, QTextBlockFormat::ProportionalHeight);
+        }
+        c.setBlockFormat(f);
+        for (auto it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            if (!frag.charFormat().isImageFormat())
+                continue;
+            QTextCharFormat text = frag.charFormat();   // the surrounding style (Qt drops a link around an image)
+            text.setObjectType(QTextFormat::NoObject);
+            text.clearProperty(QTextFormat::ImageName);
+            images.append({frag.position(), frag.length(), frag.charFormat().property(QTextFormat::ImageAltText).toString(), text});
+        }
+    }
+    for (auto i = images.crbegin(); i != images.crend(); ++i) {   // from the end: positions stay valid
+        QTextCursor c(&doc);
+        c.setPosition(i->position);
+        c.setPosition(i->position + i->length, QTextCursor::KeepAnchor);
+        c.insertText(i->alt, i->format);
+    }
+    edit.endEditBlock();
+    static const QRegularExpression body(QStringLiteral("<body style=\"[^\"]*\">"));
+    return doc.toHtml().replace(body, QStringLiteral("<body>"));
+}
+
+int rowHeight(const QFont &font)
+{
+    return int(std::ceil(std::ceil(QFontMetricsF(font).lineSpacing()) * kLineHeight));
+}
+
 Measure measure(const QString &text, const QFont &font, int maxRows)
 {
     const QStringList lines = splitRows(text.left(kMeasureChars));
@@ -179,7 +232,7 @@ Measure measure(const QString &text, const QFont &font, int maxRows)
     Measure m;
     m.columns = std::clamp(widest, geometry::kMinColumns, geometry::kMaxColumns);
     m.advance = fm.horizontalAdvance(QLatin1Char('M'));
-    m.rowHeight = int(std::ceil(fm.lineSpacing()));
+    m.rowHeight = rowHeight(font);
 
     const int width = geometry::textViewportWidth(m.columns, m.advance);
     QTextOption opt;

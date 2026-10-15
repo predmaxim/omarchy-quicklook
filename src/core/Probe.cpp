@@ -37,8 +37,8 @@ void detailText(ProbeResult &r)
         return;
     }
     const QFont font = text::monospaceFont();
-    const int rowH = qCeil(QFontMetricsF(font).lineSpacing());
-    const int maxRows = std::max(1, (geometry::box(r.monitor).height() - 32) / std::max(1, rowH));
+    const int rowH = text::rowHeight(font);
+    const int maxRows = std::max(1, (geometry::box(r.monitor).height() - 2 * geometry::kTextPadding) / std::max(1, rowH));
     r.textMeasure = text::measure(r.text.text, font, maxRows);
     r.highlight = !text::hasLongLine(r.text.text);
     r.layout = geometry::textLayout(r.textMeasure.columns, r.textMeasure.rows, r.textMeasure.advance,
