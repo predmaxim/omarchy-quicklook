@@ -15,6 +15,44 @@ namespace ql::text {
 
 namespace {
 
+// Fixes before Qt's Markdown import, fenced code left alone:
+// - GitHub lets a table interrupt a paragraph (a "**[details]**" line right above it), Qt's md4c does not and shows
+//   the rows as text: a blank line goes in before such a header row;
+// - <br> (the only line break a table cell has) is inserted by Qt as HTML that wrecks the table and empties
+//   everything after it: U+2028 instead, a line break inside the block;
+// - Qt merges an empty cell into the one on its left (GitHub keeps it empty): &nbsp; in it.
+QString prepareMarkdown(const QString &markdown)
+{
+    static const QRegularExpression br(QStringLiteral("\\s*<br\\s*/?>\\s*"), QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression emptyCell(QStringLiteral("(?<=\\|)\\s*(?=\\|)"));
+    static const QRegularExpression delimiter(QStringLiteral("^ {0,3}\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$"));
+    static const QRegularExpression fence(QStringLiteral("^ {0,3}(```|~~~)"));
+    const QStringList lines = markdown.split(u'\n');
+    bool inFence = false, inTable = false;
+    QStringList out;
+    out.reserve(lines.size());
+    for (qsizetype i = 0; i < lines.size(); ++i) {
+        QString l = lines.at(i);
+        if (fence.match(l).hasMatch()) {
+            inFence = !inFence;
+            inTable = false;
+        } else if (!inFence && i + 1 < lines.size() && l.contains(u'|') && lines.at(i + 1).contains(u'|')
+                   && delimiter.match(lines.at(i + 1)).hasMatch()) {
+            if (i > 0 && !lines.at(i - 1).trimmed().isEmpty())
+                out << QString();
+            inTable = true;
+        } else if (inTable && (l.trimmed().isEmpty() || !l.contains(u'|'))) {
+            inTable = false;
+        }
+        if (!inFence)
+            l.replace(br, QString(QChar::LineSeparator));
+        if (inTable && !delimiter.match(l).hasMatch())
+            l.replace(emptyCell, QStringLiteral(" &nbsp; "));
+        out << l;
+    }
+    return out.join(u'\n');
+}
+
 bool isWide(char32_t c)
 {
     return (c >= 0x1100 && c <= 0x115F) || (c >= 0x2E80 && c <= 0xA4CF) || (c >= 0xAC00 && c <= 0xD7A3)
@@ -173,7 +211,9 @@ QFont monospaceFont()
 QString markdownHtml(const QString &markdown)
 {
     QTextDocument doc;   // no layout is ever requested: edits cost no relayout
-    doc.setMarkdown(markdown);
+    // 0x4000 is md4c's MD_FLAG_UNDERLINE: without it _x_ is italic, as on GitHub
+    doc.setMarkdown(prepareMarkdown(markdown),
+                    QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub & ~0x4000));
     QTextCursor edit(&doc);
     edit.beginEditBlock();
     struct Image { int position; int length; QString alt; QTextCharFormat format; };

@@ -75,6 +75,19 @@ private Q_SLOTS:
         QVERIFY(html.contains(u"line-height:%1%;"_s.arg(kLineHeight * 100)));
         QVERIFY(html.contains(u"line-height:100%;"_s));             // table cells
     }
+    void markdownTableRightAfterText()   // GitHub renders it as a table; fenced code stays code
+    {
+        QVERIFY(ql::text::markdownHtml(u"**[details]**\n| a | b |\n|---|---|\n| 1 | 2 |\n"_s).contains(u"<table"_s));
+        QVERIFY(!ql::text::markdownHtml(u"```\nx\n| a | b |\n|---|---|\n```\n"_s).contains(u"<table"_s));
+        QVERIFY(ql::text::markdownHtml(u"Title\n---\n"_s).contains(u"<h2"_s));   // a setext heading is no table
+        const QString br = ql::text::markdownHtml(u"| a | b |\n|---|---|\n| one <br> two | x<br/>y |\n\nafter\n"_s);
+        QVERIFY(br.contains(u"one<br />two"_s));   // a line break in the cell, not HTML pasted into it
+        QVERIFY(br.contains(u">after</p>"_s));   // the rest survives
+        const QString empty = ql::text::markdownHtml(u"| a | b | c |\n|---|---|---|\n| 1 |  | 3 |\n"_s);
+        QCOMPARE(empty.count(u"<td"_s), 6);        // the empty cell is not merged into "1"
+        QVERIFY(!empty.contains(u"colspan"_s));
+        QVERIFY(ql::text::markdownHtml(u"a _it_ b"_s).contains(u"font-style:italic"_s));
+    }
     void measureShort()
     {
         const auto m = measure("a\nb\nc", monospaceFont(), 1000);
